@@ -457,19 +457,11 @@ StdLibDataStructures::eraseCallsTo(Function* F) {
   DenseSet<RemovalPair> ToRemove;
   for (Value::user_iterator ii = F->user_begin(), ee = F->user_end();
        ii != ee; ++ii)
-    if (CallInst* CI = dyn_cast<CallInst>(*ii)){
-      if (CI->getCalledValue() == F) {
+    if (CallBase* CI = dyn_cast<CallBase>(*ii)){
+      if (CI->getCalledOperand() == F) {
         DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
         //delete the call
-        DEBUG(errs() << "Removing " << F->getName().str() << " from "
-              << CI->getParent()->getParent()->getName().str() << "\n");
-        ToRemove.insert(std::make_pair(Graph, F));
-      }
-    }else if (InvokeInst* CI = dyn_cast<InvokeInst>(*ii)){
-      if (CI->getCalledValue() == F) {
-        DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
-        //delete the call
-        DEBUG(errs() << "Removing " << F->getName().str() << " from "
+        LLVM_DEBUG(errs() << "Removing " << F->getName().str() << " from "
               << CI->getParent()->getParent()->getName().str() << "\n");
         ToRemove.insert(std::make_pair(Graph, F));
       }
@@ -478,10 +470,10 @@ StdLibDataStructures::eraseCallsTo(Function* F) {
         for (Value::user_iterator ci = CE->user_begin(), ce = CE->user_end();
              ci != ce; ++ci) {
           if (CallInst* CI = dyn_cast<CallInst>(*ci)){
-            if(CI->getCalledValue() == CE) {
+            if(CI->getCalledOperand() == CE) {
               DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
               //delete the call
-              DEBUG(errs() << "Removing " << F->getName().str() << " from "
+              LLVM_DEBUG(errs() << "Removing " << F->getName().str() << " from "
                     << CI->getParent()->getParent()->getName().str() << "\n");
               ToRemove.insert(std::make_pair(Graph, F));
             }
@@ -529,7 +521,7 @@ StdLibDataStructures::processRuntimeCheck (Module & M,
   for (Value::user_iterator ii = F->user_begin(), ee = F->user_end();
        ii != ee; ++ii) {
     if (CallInst* CI = dyn_cast<CallInst>(*ii)) {
-      if (CI->getCalledValue() == F) {
+      if (CI->getCalledOperand() == F) {
         DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
         DSNodeHandle & RetNode = Graph->getNodeForValue(CI);
         DSNodeHandle & ArgNode = Graph->getNodeForValue(CI->getArgOperand(arg));
@@ -660,12 +652,12 @@ StdLibDataStructures::runOnModule (Module &M) {
       G->markIncompleteNodes(DSGraph::MarkFormalArgs
                              |DSGraph::IgnoreGlobals);
       G->computeExternalFlags(EFlags);
-      DEBUG(G->AssertGraphOK());
+      LLVM_DEBUG(G->AssertGraphOK());
     }
   GlobalsGraph->markIncompleteNodes(DSGraph::MarkFormalArgs
                                     |DSGraph::IgnoreGlobals);
   GlobalsGraph->computeExternalFlags(DSGraph::ProcessCallSites);
-  DEBUG(GlobalsGraph->AssertGraphOK());
+  LLVM_DEBUG(GlobalsGraph->AssertGraphOK());
   for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I)
     if (!I->isDeclaration()) {
       DSGraph *Graph = getOrCreateGraph(&*I);
@@ -684,7 +676,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
   for (Value::user_iterator ii = F->user_begin(), ee = F->user_end();
        ii != ee; ++ii)
     if (CallInst* CI = dyn_cast<CallInst>(*ii)){
-      if (CI->getCalledValue() == F) {
+      if (CI->getCalledOperand() == F) {
         DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
 
         //
@@ -706,7 +698,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
         // Set the read, write, and heap markers on the actual arguments
         // as appropriate.
         //
-        for (unsigned y = 0; y < CI->getNumArgOperands(); ++y)
+        for (unsigned y = 0; y < CI->arg_size(); ++y)
           if (isa<PointerType>(CI->getArgOperand(y)->getType())){
             if (Graph->hasNodeForValue(CI->getArgOperand(y))){
               if (recFuncs[x].action.read[y + 1])
@@ -727,7 +719,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
           if (isa<PointerType>(CI->getType()))
             if (Graph->hasNodeForValue(CI))
               toMerge.push_back(Graph->getNodeForValue(CI));
-        for (unsigned y = 0; y < CI->getNumArgOperands(); ++y)
+        for (unsigned y = 0; y < CI->arg_size(); ++y)
           if (recFuncs[x].action.mergeNodes[y + 1])
             if (isa<PointerType>(CI->getArgOperand(y)->getType()))
               if (Graph->hasNodeForValue(CI->getArgOperand(y)))
@@ -745,7 +737,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
               Graph->getNodeForValue(CI).getNode()->foldNodeCompletely();
             NumNodesFoldedInStdLib++;
           }
-          for (unsigned y = 0; y < CI->getNumArgOperands(); ++y){
+          for (unsigned y = 0; y < CI->arg_size(); ++y){
             if (isa<PointerType>(CI->getArgOperand(y)->getType())){
               if (Graph->hasNodeForValue(CI->getArgOperand(y))){
                 Graph->getNodeForValue(CI->getArgOperand(y)).getNode()->foldNodeCompletely();
@@ -756,7 +748,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
         }
       }
     } else if (InvokeInst* CI = dyn_cast<InvokeInst>(*ii)){
-      if (CI->getCalledValue() == F) {
+      if (CI->getCalledOperand() == F) {
         DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
 
         //
@@ -778,7 +770,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
         // Set the read, write, and heap markers on the actual arguments
         // as appropriate.
         //
-        for (unsigned y = 0; y < CI->getNumArgOperands(); ++y)
+        for (unsigned y = 0; y < CI->arg_size(); ++y)
           if (isa<PointerType>(CI->getArgOperand(y)->getType())){
             if (Graph->hasNodeForValue(CI->getArgOperand(y))){
               if (recFuncs[x].action.read[y + 1])
@@ -799,7 +791,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
           if (isa<PointerType>(CI->getType()))
             if (Graph->hasNodeForValue(CI))
               toMerge.push_back(Graph->getNodeForValue(CI));
-        for (unsigned y = 0; y < CI->getNumArgOperands(); ++y)
+        for (unsigned y = 0; y < CI->arg_size(); ++y)
           if (recFuncs[x].action.mergeNodes[y + 1])
             if (isa<PointerType>(CI->getArgOperand(y)->getType()))
               if (Graph->hasNodeForValue(CI->getArgOperand(y)))
@@ -817,7 +809,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
               Graph->getNodeForValue(CI).getNode()->foldNodeCompletely();
             NumNodesFoldedInStdLib++;
           }
-          for (unsigned y = 0; y < CI->getNumArgOperands(); ++y){
+          for (unsigned y = 0; y < CI->arg_size(); ++y){
             if (isa<PointerType>(CI->getArgOperand(y)->getType())){
               if (Graph->hasNodeForValue(CI->getArgOperand(y))){
                 Graph->getNodeForValue(CI->getArgOperand(y)).getNode()->foldNodeCompletely();
@@ -833,7 +825,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
              ci != ce; ++ci) {
 
           if (CallInst* CI = dyn_cast<CallInst>(*ci)){
-            if (CI->getCalledValue() == CE) {
+            if (CI->getCalledOperand() == CE) {
               DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
 
               //
@@ -855,7 +847,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
               // Set the read, write, and heap markers on the actual arguments
               // as appropriate.
               //
-              for (unsigned y = 0; y < CI->getNumArgOperands(); ++y)
+              for (unsigned y = 0; y < CI->arg_size(); ++y)
                 if (recFuncs[x].action.read[y + 1]){
                   if (isa<PointerType>(CI->getArgOperand(y)->getType())){
                     if (Graph->hasNodeForValue(CI->getArgOperand(y)))
@@ -876,7 +868,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
                 if (isa<PointerType>(CI->getType()))
                   if (Graph->hasNodeForValue(CI))
                     toMerge.push_back(Graph->getNodeForValue(CI));
-              for (unsigned y = 0; y < CI->getNumArgOperands(); ++y)
+              for (unsigned y = 0; y < CI->arg_size(); ++y)
                 if (recFuncs[x].action.mergeNodes[y + 1])
                   if (isa<PointerType>(CI->getArgOperand(y)->getType()))
                     if (Graph->hasNodeForValue(CI->getArgOperand(y)))
@@ -894,7 +886,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
                     Graph->getNodeForValue(CI).getNode()->foldNodeCompletely();
                   NumNodesFoldedInStdLib++;
                 }
-                for (unsigned y = 0; y < CI->getNumArgOperands(); ++y)
+                for (unsigned y = 0; y < CI->arg_size(); ++y)
                   if (isa<PointerType>(CI->getArgOperand(y)->getType())){
                     if (Graph->hasNodeForValue(CI->getArgOperand(y))){
                       DSNode * Node=Graph->getNodeForValue(CI->getArgOperand(y)).getNode();

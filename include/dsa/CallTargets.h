@@ -16,7 +16,7 @@
 #define LLVM_ANALYSIS_CALLTARGETS_H
 
 #include "llvm/Pass.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/InstrTypes.h"
 #include "dsa/DataStructure.h"
 
 #include <set>
@@ -28,9 +28,9 @@ namespace dsa{
 
   template<class dsa>
   class CallTargetFinder : public ModulePass {
-    std::map<CallSite, std::vector<const Function*> > IndMap;
-    std::set<CallSite> CompleteSites;
-    std::list<CallSite> AllSites;
+    std::map<CallBase*, std::vector<const Function*> > IndMap;
+    std::set<CallBase*> CompleteSites;
+    std::list<CallBase*> AllSites;
 
     void findIndTargets(Module &M);
   public:
@@ -44,27 +44,27 @@ namespace dsa{
     virtual void print(llvm::raw_ostream &O, const Module *M) const;
 
     // Given a CallSite, get an iterator of callees
-    std::vector<const Function*>::iterator begin(CallSite cs){
+    std::vector<const Function*>::iterator begin(CallBase* cs){
       return IndMap[cs].begin();
     }
-    std::vector<const Function*>::iterator end(CallSite cs){
+    std::vector<const Function*>::iterator end(CallBase* cs){
       return IndMap[cs].end();
     }
-    unsigned size(CallSite cs){
+    unsigned size(CallBase* cs){
       return IndMap[cs].size();
     }
 
     // Iterate over CallSites in program
-    std::list<CallSite>::iterator cs_begin(){
+    std::list<CallBase*>::iterator cs_begin(){
       return AllSites.begin();
     }
-    std::list<CallSite>::iterator cs_end(){
+    std::list<CallBase*>::iterator cs_end(){
       return AllSites.end();
     }
 
     // Do we think we have complete knowledge of this site?
     // That is, do we think there are no missing callees
-    bool isComplete(CallSite cs) const {
+    bool isComplete(CallBase* cs) const {
       return CompleteSites.find(cs) != CompleteSites.end();
     }
   };

@@ -16,6 +16,8 @@
 // on call sites and callees to operate (such as a devirtualizer).
 //
 //===----------------------------------------------------------------------===//
+#include <llvm/IR/InstrTypes.h>
+#include <llvm/Support/Casting.h>
 #define DEBUG_TYPE "call-targets"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Instructions.h"
@@ -70,12 +72,12 @@ void CallTargetFinder<dsa>::findIndTargets(Module &M)
       for (Function::iterator F = I->begin(), FE = I->end(); F != FE; ++F)
         for (BasicBlock::iterator B = F->begin(), BE = F->end(); B != BE; ++B)
           if (isa<CallInst>(B) || isa<InvokeInst>(B)) {
-            CallSite cs(&*B);
+            CallBase* cs = dyn_cast<CallBase>(&*B);
             AllSites.push_back(cs);
-            Function* CF = cs.getCalledFunction();
+            Function* CF = cs->getCalledFunction();
 
-            if (isa<UndefValue>(cs.getCalledValue())) continue;
-            if (isa<InlineAsm>(cs.getCalledValue())) continue;
+            if (isa<UndefValue>(cs->getCalledOperand())) continue;
+            if (isa<InlineAsm>(cs->getCalledOperand())) continue;
 
             //
             // If the called function is casted from one function type to
@@ -83,10 +85,10 @@ void CallTargetFinder<dsa>::findIndTargets(Module &M)
             // function being called.
             //
             if (!CF)
-              CF = dyn_cast<Function>(cs.getCalledValue()->stripPointerCasts());
+              CF = dyn_cast<Function>(cs->getCalledOperand()->stripPointerCasts());
 
             if (!CF) {
-              Value * calledValue = cs.getCalledValue()->stripPointerCasts();
+              Value * calledValue = cs->getCalledOperand()->stripPointerCasts();
               if (isa<ConstantPointerNull>(calledValue)) {
                 ++DirCall;
                 CompleteSites.insert(cs);
@@ -107,7 +109,7 @@ void CallTargetFinder<dsa>::findIndTargets(Module &M)
                   }
                   ++csi;
                 }
-                const Function *F1 = (cs).getInstruction()->getParent()->getParent();
+                const Function *F1 = cs->getParent()->getParent();
                 F1 = callgraph.sccLeader(&*F1);
                 
                 DSCallGraph::scc_iterator sccii = callgraph.scc_begin(F1),
@@ -119,8 +121,8 @@ void CallTargetFinder<dsa>::findIndTargets(Module &M)
                   }
                 }
 
-                DSNode* N = T->getDSGraph(*cs.getCaller())
-                  ->getNodeForValue(cs.getCalledValue()).getNode();
+                DSNode* N = T->getDSGraph(*cs->getCaller())
+                  ->getNodeForValue(cs->getCalledOperand()).getNode();
                 assert (N && "CallTarget: findIndTargets: No DSNode!");
 
                 if (!N->isIncompleteNode() && !isExternal(N) && IndMap[cs].size()) {
@@ -129,10 +131,10 @@ void CallTargetFinder<dsa>::findIndTargets(Module &M)
                 } 
                 if (!N->isIncompleteNode() && !isExternal(N) && !IndMap[cs].size()) {
                   ++CompleteEmpty;
-                  DEBUG(errs() << "Call site empty: '"
-                                << cs.getInstruction()->getName()
+                  LLVM_DEBUG(errs() << "Call site empty: '"
+                                << cs->getName()
                                 << "' In '"
-                                << cs.getInstruction()->getParent()->getParent()->getName()
+                                << cs->getParent()->getParent()->getName()
                                 << "'\n");
                 }
               }
@@ -148,22 +150,22 @@ void CallTargetFinder<dsa>::findIndTargets(Module &M)
 void CallTargetFinder<dsa>::print(llvm::raw_ostream &O, const Module *M) const
 {
   O << "[* = incomplete] CS: func list\n";
-  for (std::map<CallSite, std::vector<const Function*> >::const_iterator ii =
+  for (std::map<CallBase*, std::vector<const Function*> >::const_iterator ii =
        IndMap.begin(),
          ee = IndMap.end(); ii != ee; ++ii) {
 
-    if (ii->first.getCalledFunction())  //only print indirect
+    if (ii->first->getCalledFunction())  //only print indirect
       continue;
-    if(isa<Function>(ii->first.getCalledValue()->stripPointerCasts()))
+    if(isa<Function>(ii->first->getCalledOperand()->stripPointerCasts()))
       continue;
       if (!isComplete(ii->first)) {
         O << "* ";
-        CallSite cs = ii->first;
-	O << *cs.getInstruction();
-        O << cs.getInstruction()->getParent()->getParent()->getName().str() << " "
-          << cs.getInstruction()->getName().str() << " ";
+        CallBase* cs = ii->first;
+	O << *cs;
+        O << cs->getParent()->getParent()->getName().str() << " "
+          << cs->getName().str() << " ";
       }
-      O << ii->first.getInstruction() << ":";
+      O << ii->first << ":";
       for (std::vector<const Function*>::const_iterator i = ii->second.begin(),
              e = ii->second.end(); i != e; ++i) {
         O << " " << (*i)->getName().str();

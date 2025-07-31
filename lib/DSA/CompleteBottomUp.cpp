@@ -120,7 +120,7 @@ CompleteBUDataStructures::buildIndirectFunctionSets (void) {
     // Graph, but at least one of the functions in the SCC
     // should have an entry in the GlobalsGraph
 
-    Value *CalledValue = (*ii).getCalledValue()->stripPointerCasts();
+    Value *CalledValue = (*ii)->getCalledOperand()->stripPointerCasts();
     
     bool isIndirect = (!isa<Function>(CalledValue));
     if (isIndirect) {
@@ -173,7 +173,7 @@ CompleteBUDataStructures::buildIndirectFunctionSets (void) {
     // When we build SCCs we remove any calls that are to functions in the 
     // same SCC. Hence, for every indirect call site we must assume that it
     // might call functions in its function's SCC that are address taken.
-    const Function *F1 = (*ii).getInstruction()->getParent()->getParent();
+    const Function *F1 = (*ii)->getParent()->getParent();
     F1 = callgraph.sccLeader(&*F1);
 
     DSCallGraph::scc_iterator sccii = callgraph.scc_begin(F1),

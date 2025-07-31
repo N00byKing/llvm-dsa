@@ -13,12 +13,9 @@
 
 #include "dsa/DSCallGraph.h"
 #include "dsa/DataStructure.h"
-#include "dsa/DSGraph.h"
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/DerivedTypes.h"
-#include "llvm/Support/FormattedStream.h"
-#include "llvm/Support/CommandLine.h"
 
 #include <algorithm>
 
@@ -37,14 +34,14 @@ bool DSCallGraph::hasPointers(const llvm::Function* F) {
   return _hasPointers(F->getFunctionType());
 }
 
-bool DSCallGraph::hasPointers(llvm::CallSite& CS) {
-  if (CS.getCalledFunction())
-    return hasPointers(CS.getCalledFunction());
+bool DSCallGraph::hasPointers(llvm::CallBase* CS) {
+  if (CS->getCalledFunction())
+    return hasPointers(CS->getCalledFunction());
 
-  const llvm::Value* Callee = CS.getCalledValue();
+  const llvm::Value* Callee = CS->getCalledOperand();
   const llvm::Type* T = Callee->getType();
-  if (const llvm::PointerType* PT = llvm::dyn_cast<llvm::PointerType>(T))
-    T = PT->getElementType();
+  // if (const llvm::PointerType* PT = llvm::dyn_cast<llvm::PointerType>(T))
+  //   T = PT->getElementType();
   return _hasPointers(llvm::cast<llvm::FunctionType>(T));
 }
 
@@ -228,11 +225,11 @@ void DSCallGraph::dump() {
 //       call graph.
 //
 void
-DSCallGraph::insert(llvm::CallSite CS, const llvm::Function* F) {
+DSCallGraph::insert(llvm::CallBase* CS, const llvm::Function* F) {
   //
   // Find the function to which the call site belongs.
   //
-  const llvm::Function * Parent = CS.getInstruction()->getParent()->getParent();
+  const llvm::Function * Parent = CS->getParent()->getParent();
 
   //
   // Determine the SCC leaders for both the calling function and the called
@@ -258,7 +255,7 @@ void DSCallGraph::insureEntry(const llvm::Function* F) {
   SimpleCallees[F];
 }
 
-void DSCallGraph::addFullFunctionSet(llvm::CallSite CS,
+void DSCallGraph::addFullFunctionSet(llvm::CallBase* CS,
                     svset<const llvm::Function*> &Set) const {
   DSCallGraph::callee_iterator csi = callee_begin(CS),
                                cse = callee_end(CS);
@@ -267,7 +264,7 @@ void DSCallGraph::addFullFunctionSet(llvm::CallSite CS,
     Set.insert(scc_begin(F), scc_end(F));
     ++csi;
   }
-  const Function *F1 = CS.getInstruction()->getParent()->getParent();
+  const Function *F1 = CS->getParent()->getParent();
   F1 = sccLeader(&*F1);
   Set.insert(scc_begin(F1), scc_end(F1));
 }

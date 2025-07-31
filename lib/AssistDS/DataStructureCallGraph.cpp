@@ -19,7 +19,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/InstIterator.h"
 
 using namespace llvm;
@@ -100,7 +100,7 @@ void DataStructureCallGraph::addToCallGraph(Function *F) {
       continue;
 
     if (const Function *F = 
-        dyn_cast<Function>(CS.getCalledValue()->stripPointerCasts())) {
+        dyn_cast<Function>(CS->getCalledOperand()->stripPointerCasts())) {
       // Direct call: Don't use DSA, just add the function we discovered as
       // the call target.
 

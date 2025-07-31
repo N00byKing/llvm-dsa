@@ -81,7 +81,7 @@ namespace {
                            std::vector<Function*>& Targets,
                            Module& M) {
 
-      Value* ptr = cs.getCalledValue();
+      Value* ptr = cs->getCalledOperand();
       const FunctionType* OrigType = 
         cast<FunctionType>(cast<PointerType>(ptr->getType())->getElementType());;
       ++FuncAdded;
@@ -199,13 +199,13 @@ namespace {
              uii != uie; ++uii) {
           CallSite cs = CallSite::get(*uii);
           bool isSafeCall = cs.getInstruction() && 
-            safecalls.find(cs.getCalledValue()) != safecalls.end();
+            safecalls.find(cs->getCalledOperand()) != safecalls.end();
           if (cs.getInstruction() && !cs.getCalledFunction() &&
               (isSafeCall || CTF->isComplete(cs))) {
             std::vector<const Function*> Targets;
             for (std::vector<const Function*>::iterator ii = CTF->begin(cs), ee = CTF->end(cs);
                  ii != ee; ++ii)
-              if (!isSafeCall || (*ii)->getType() == cs.getCalledValue()->getType())
+              if (!isSafeCall || (*ii)->getType() == cs->getCalledOperand()->getType())
                 Targets.push_back(*ii);
 
             if (Targets.size() > 0) {

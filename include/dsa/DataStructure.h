@@ -22,7 +22,7 @@
 
 #include "llvm/Pass.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/ADT/EquivalenceClasses.h"
 #include "llvm/ADT/DenseSet.h"
 
@@ -107,7 +107,7 @@ protected:
 public:
   /// print - Print out the analysis results...
   ///
-  void print(llvm::raw_ostream &O, const Module *M) const;
+  void print(llvm::raw_ostream &O, const Module *M) const override;
   void dumpCallGraph() const;
 
   /// handleTest - Handles various user-specified testing options.
@@ -115,7 +115,7 @@ public:
   ///
   bool handleTest(llvm::raw_ostream &O, const Module *M) const;
 
-  virtual void releaseMemory();
+  virtual void releaseMemory() override;
 
   virtual bool hasDSGraph(const Function &F) const {
     return DSInfo.find(&F) != DSInfo.end();
@@ -160,11 +160,11 @@ public:
   BasicDataStructures() : DataStructures(ID, "basic.") {}
   ~BasicDataStructures() { releaseMemory(); }
 
-  virtual bool runOnModule(Module &M);
+  virtual bool runOnModule(Module &M) override;
 
   /// getAnalysisUsage - This obviously provides a data structure graph.
   ///
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();
   }
 };
@@ -182,11 +182,11 @@ public:
   LocalDataStructures() : DataStructures(ID, "local.") {}
   ~LocalDataStructures() { releaseMemory(); }
 
-  virtual bool runOnModule(Module &M);
+  virtual bool runOnModule(Module &M) override;
 
   /// getAnalysisUsage - This obviously provides a data structure graph.
   ///
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<AddressTakenAnalysis>();
     AU.setPreservesAll();
   }
@@ -206,11 +206,11 @@ public:
   StdLibDataStructures() : DataStructures(ID, "stdlib.") {}
   ~StdLibDataStructures() { releaseMemory(); }
 
-  virtual bool runOnModule(Module &M);
+  virtual bool runOnModule(Module &M) override;
 
   /// getAnalysisUsage - This obviously provides a data structure graph.
   ///
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<LocalDataStructures>();
     AU.addRequired<AllocIdentify>();
     AU.setPreservesAll();
@@ -245,9 +245,9 @@ public:
     filterCallees(true) {}
   ~BUDataStructures() { releaseMemory(); }
 
-  virtual bool runOnModule(Module &M);
+  virtual bool runOnModule(Module &M) override ;
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<StdLibDataStructures>();
     AU.setPreservesAll();
   }
@@ -292,9 +292,9 @@ public:
     : BUDataStructures(CID, name, printname, false) {}
   ~CompleteBUDataStructures() { releaseMemory(); }
 
-  virtual bool runOnModule(Module &M);
+  virtual bool runOnModule(Module &M) override ;
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<BUDataStructures>();
     AU.setPreservesAll();
   }
@@ -316,9 +316,9 @@ public:
     : CompleteBUDataStructures(ID, "dsa-eq", "eq.") {}
   ~EquivBUDataStructures() { releaseMemory(); }
 
-  virtual bool runOnModule(Module &M);
+  virtual bool runOnModule(Module &M) override ;
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<CompleteBUDataStructures>();
     AU.setPreservesAll();
   }
@@ -366,11 +366,11 @@ public:
     : DataStructures(CID, printname), useEQBU(useEQ) {}
   ~TDDataStructures();
 
-  virtual bool runOnModule(Module &M);
+  virtual bool runOnModule(Module &M) override ;
 
   /// getAnalysisUsage - This obviously provides a data structure graph.
   ///
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {
+  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
     if (useEQBU) {
       AU.addRequired<EquivBUDataStructures>();
     } else {

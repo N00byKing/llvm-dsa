@@ -19,7 +19,7 @@
 
 #include <cstddef>
 #include "llvm/ADT/EquivalenceClasses.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/InstrTypes.h"
 
 #include <cassert>
 #include <map>
@@ -27,7 +27,7 @@
 class DSCallGraph {
 public:
   typedef svset<const llvm::Function*> FuncSet;
-  typedef std::map<llvm::CallSite, FuncSet> ActualCalleesTy;
+  typedef std::map<llvm::CallBase*, FuncSet> ActualCalleesTy;
   typedef std::map<const llvm::Function*, FuncSet> SimpleCalleesTy;
 
 private:
@@ -51,7 +51,7 @@ private:
   // unresolved call site.
   svset<const llvm::Function*> IncompleteCalleeSet;
 
-  svset<llvm::CallSite> completeCS;
+  svset<llvm::CallBase*> completeCS;
 
   // Types for SCC construction
   typedef std::map<const llvm::Function*, unsigned> TFMap;
@@ -74,24 +74,24 @@ public:
   typedef FuncSet::const_iterator                      root_iterator;
   typedef llvm::EquivalenceClasses<const llvm::Function*>::member_iterator scc_iterator;
 
-  void insert(llvm::CallSite CS, const llvm::Function* F);
+  void insert(llvm::CallBase* CS, const llvm::Function* F);
 
   void insureEntry(const llvm::Function* F);
 
   template<class Iterator>
-  void insert(llvm::CallSite CS, Iterator _begin, Iterator _end) {
+  void insert(llvm::CallBase CS, Iterator _begin, Iterator _end) {
     for (; _begin != _end; ++_begin)
       insert(CS, *_begin);
   }
 
-  callee_iterator callee_begin(llvm::CallSite CS) const {
+  callee_iterator callee_begin(llvm::CallBase* CS) const {
     ActualCalleesTy::const_iterator ii = ActualCallees.find(CS);
     if (ii == ActualCallees.end())
       return EmptyActual.end();
     return ii->second.begin();
   }
 
-  callee_iterator callee_end(llvm::CallSite CS) const {
+  callee_iterator callee_end(llvm::CallBase* CS) const {
     ActualCalleesTy::const_iterator ii = ActualCallees.find(CS);
     if (ii == ActualCallees.end())
       return EmptyActual.end();
@@ -149,7 +149,7 @@ public:
   const llvm::Function* sccLeader(const llvm::Function*F) const {
     return SCCs.getLeaderValue(F);
   }
-  unsigned callee_size(llvm::CallSite CS) const {
+  unsigned callee_size(llvm::CallBase* CS) const {
     ActualCalleesTy::const_iterator ii = ActualCallees.find(CS);
     if (ii == ActualCallees.end())
       return 0;
@@ -160,11 +160,11 @@ public:
     return !(IncompleteCalleeSet.find(F) 
              == IncompleteCalleeSet.end()); 
   }
-  void callee_mark_complete(llvm::CallSite CS) {
+  void callee_mark_complete(llvm::CallBase* CS) {
     completeCS.insert(CS);
   }
 
-  bool callee_is_complete(llvm::CallSite CS) const {
+  bool callee_is_complete(llvm::CallBase* CS) const {
     return completeCS.find(CS) != completeCS.end();
   }
 
@@ -186,9 +186,9 @@ public:
 
   void buildIncompleteCalleeSet(svset<const llvm::Function*> callees);
 
-  void addFullFunctionSet(llvm::CallSite CS, svset<const llvm::Function*> &Set) const;
+  void addFullFunctionSet(llvm::CallBase* CS, svset<const llvm::Function*> &Set) const;
   // Temporary compat wrapper
-  void addFullFunctionList(llvm::CallSite CS, std::vector<const llvm::Function*> &List) const {
+  void addFullFunctionList(llvm::CallBase* CS, std::vector<const llvm::Function*> &List) const {
     svset<const llvm::Function*> Set;
     addFullFunctionSet(CS, Set);
     List.insert(List.end(), Set.begin(), Set.end());
@@ -202,7 +202,7 @@ public:
 
   // common helper; no good reason for it to be here rather than elsewhere
   static bool hasPointers(const llvm::Function* F);
-  static bool hasPointers(llvm::CallSite& CS);
+  static bool hasPointers(llvm::CallBase* CS);
 
 };
 

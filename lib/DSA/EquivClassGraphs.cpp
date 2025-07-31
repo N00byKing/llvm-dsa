@@ -20,7 +20,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "dsa/DSGraph.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/ADT/Statistic.h"
@@ -66,7 +66,7 @@ bool EquivBUDataStructures::runOnModule(Module &M) {
       i!=e;i++) {
     delete (*i);
   }
-  DEBUG(verifyMerging());
+  LLVM_DEBUG(verifyMerging());
 
   formGlobalECs();
 

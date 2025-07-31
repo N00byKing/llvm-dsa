@@ -20,7 +20,7 @@
 #include <set>
 
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/InstrTypes.h"
 
 namespace llvm {
 
@@ -158,9 +158,9 @@ namespace llvm {
 ///
 class DSCallSite {
 public:
-  typedef std::set<CallSite> MappedSites_t;
+  typedef std::set<CallBase*> MappedSites_t;
 private:
-  CallSite        Site;               // Actual call site
+  CallBase*        Site;               // Actual call site
   const Function *CalleeF;            // The function called (direct call)
   DSNodeHandle    CalleeN;            // The function node called (indirect call)
   DSNodeHandle    RetVal;             // Returned value
@@ -197,13 +197,13 @@ public:
   /// Constructor.  Note - This ctor destroys the argument vector passed in.  On
   /// exit, the argument vector is empty.
   ///
-  DSCallSite(CallSite CS, const DSNodeHandle &rv, const DSNodeHandle &va,
+  DSCallSite(CallBase* CS, const DSNodeHandle &rv, const DSNodeHandle &va,
              DSNode *Callee, std::vector<DSNodeHandle> &Args)
     : Site(CS), CalleeF(0), CalleeN(Callee), RetVal(rv), VarArgVal(va) {
     assert(Callee && "Null callee node specified for call site!");
     Args.swap(CallArgs);
   }
-  DSCallSite(CallSite CS, const DSNodeHandle &rv, const DSNodeHandle &va,
+  DSCallSite(CallBase* CS, const DSNodeHandle &rv, const DSNodeHandle &va,
              const Function *Callee, std::vector<DSNodeHandle> &Args)
     : Site(CS), CalleeF(Callee), RetVal(rv), VarArgVal(va) {
     assert(Callee && "Null callee function specified for call site!");
@@ -253,8 +253,8 @@ public:
 
 
   // Accessor functions...
-  const Function     &getCaller()     const;
-  CallSite            getCallSite()   const { return Site; }
+  const Function* getCaller()     const;
+  CallBase*            getCallSite()   const { return Site; }
         DSNodeHandle &getRetVal()           { return RetVal; }
   const DSNodeHandle &getRetVal()     const { return RetVal; }
         DSNodeHandle &getVAVal()            { return VarArgVal; }
@@ -357,7 +357,7 @@ public:
   /// FunctionTypeOfCallSite - Helper method to extract the signature of a function
   /// that is called a given CallSite
   ///
-  static const FunctionType *FunctionTypeOfCallSite(const CallSite & Site);
+  static const FunctionType *FunctionTypeOfCallSite(const CallBase* Site);
 
   /// isVarArg - Determines if the call this represents is to a variable argument
   /// function

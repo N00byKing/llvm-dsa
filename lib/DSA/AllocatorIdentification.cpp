@@ -160,11 +160,11 @@ bool AllocIdentify::runOnModule(Module& M) {
           if(isWrapper)
             isWrapper = isWrapper && isNotStored(CI);
           if(isWrapper) {
-            changed = (allocators.find(WrapperF->getName()) == allocators.end());
+            changed = (allocators.find(WrapperF->getName().str()) == allocators.end());
             if(changed) {
               ++numAllocators;
-              allocators.insert(WrapperF->getName());
-              DEBUG(errs() << WrapperF->getName().str() << "\n");
+              allocators.insert(WrapperF->getName().str());
+              LLVM_DEBUG(errs() << WrapperF->getName().str() << "\n");
             }
           }
         }
@@ -195,11 +195,11 @@ bool AllocIdentify::runOnModule(Module& M) {
             continue;
           Argument *arg = dyn_cast<Argument>(WrapperF->arg_begin());
           if(flowsFrom(CI->getOperand(1), arg)) {
-            changed = (deallocators.find(WrapperF->getName()) == deallocators.end());
+            changed = (deallocators.find(WrapperF->getName().str()) == deallocators.end());
             if(changed) {
               ++numDeallocators;
-              deallocators.insert(WrapperF->getName());
-              DEBUG(errs() << WrapperF->getName().str() << "\n");
+              deallocators.insert(WrapperF->getName().str());
+              LLVM_DEBUG(errs() << WrapperF->getName().str() << "\n");
             }
           }
         }

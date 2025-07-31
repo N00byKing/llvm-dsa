@@ -213,7 +213,7 @@ class NodeValue {
   /// stripAtIfRequired -- removes the leading '@' character if one exists
   ///
   StringRef stripAtIfRequired(StringRef v) {
-    if (!v.startswith("@"))
+    if (!v.starts_with("@"))
         return v;
 
     assert(v.size() > 1 && "String too short");

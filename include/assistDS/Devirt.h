@@ -50,9 +50,9 @@ namespace llvm {
       std::map<const Function *, std::set<const Function *> > bounceCache;
 
     protected:
-      void makeDirectCall (CallSite & CS);
-      Function* buildBounce (CallSite cs,std::vector<const Function*>& Targets);
-      const Function* findInCache (const CallSite & CS,
+      void makeDirectCall (CallBase* CS);
+      Function* buildBounce (CallBase* cs,std::vector<const Function*>& Targets);
+      const Function* findInCache (const CallBase* CS,
                                    std::set<const Function*>& Targets);
 
     public:
@@ -67,13 +67,13 @@ namespace llvm {
 
       // Visitor methods for analyzing instructions
       //void visitInstruction(Instruction &I);
-      void visitCallSite(CallSite &CS);
+      void visitCallSite(CallBase* CS);
       void visitCallInst(CallInst &CI) {
-        CallSite CS(&CI);
+        CallBase* CS = &CI;
         visitCallSite(CS);
       }
       void visitInvokeInst(InvokeInst &II) {
-        CallSite CS(&II);
+        CallBase* CS = &II;
         visitCallSite(CS);
       }
   };

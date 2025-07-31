@@ -75,10 +75,10 @@ namespace {
     DSGraphStats() : FunctionPass(ID) {}
 
     /// Driver functions to compute the Load/Store Dep. Graph per function.
-    bool runOnFunction(Function& F);
+    bool runOnFunction(Function& F) override ;
 
     /// getAnalysisUsage - This modify nothing, and uses the Top-Down Graph.
-    void getAnalysisUsage(AnalysisUsage &AU) const {
+    void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
       AU.addRequired<TDDataStructures>();
       AU.addRequired<dsa::TypeSafety<TDDataStructures> >();
@@ -88,7 +88,7 @@ namespace {
     void visitStore(StoreInst &SI);
 
     /// Debugging support methods
-    void print(llvm::raw_ostream &O, const Module* = 0) const { }
+    void print(llvm::raw_ostream &O, const Module* = 0) const override { }
   };
 
   static RegisterPass<DSGraphStats> Z("dsstats", "DS Graph Statistics");
@@ -124,7 +124,7 @@ void DSGraphStats::countCallees(const Function& F) {
 
   for (DSGraph::fc_iterator I = TDGraph->fc_begin(), E = TDGraph->fc_end();
        I != E; ++I)
-    if (isIndirectCallee(I->getCallSite().getCalledValue())) {
+    if (isIndirectCallee(I->getCallSite()->getCalledOperand())) {
       // This is an indirect function call
       std::vector<const Function*> Callees;
       callgraph.addFullFunctionList(I->getCallSite(), Callees);
@@ -133,9 +133,9 @@ void DSGraphStats::countCallees(const Function& F) {
         totalNumCallees  += Callees.size();
         ++numIndirectCalls;
       } else {
-        DEBUG(errs() << "WARNING: No callee in Function '" 
+        LLVM_DEBUG(errs() << "WARNING: No callee in Function '" 
               << F.getName().str() << " at call: \n"
-              << *I->getCallSite().getInstruction());
+              << *I->getCallSite());
       }
     }
 
@@ -143,7 +143,7 @@ void DSGraphStats::countCallees(const Function& F) {
   NumIndirectCalls += numIndirectCalls;
 
   if (numIndirectCalls) {
-    DEBUG(errs() << "  In function " << F.getName() << ":  "
+    LLVM_DEBUG(errs() << "  In function " << F.getName() << ":  "
           << (totalNumCallees / (double) numIndirectCalls)
           << " average callees per indirect call\n");
   }
@@ -213,7 +213,7 @@ bool DSGraphStats::isNodeForValueUntyped(Value *V, unsigned Offset, const Functi
       ++NumTypeCount3Accesses;
     else
       ++NumTypeCount4Accesses;
-    DEBUG(assert(TS->isTypeSafe(V,F)));
+    LLVM_DEBUG(assert(TS->isTypeSafe(V,F)));
   }
   return false;
 }

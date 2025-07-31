@@ -50,7 +50,7 @@ bool DSNodeHandle::isForwarding() const {
 
 DSNode *DSNodeHandle::HandleForwarding() const {
   assert(N->isForwarding() && "Can only be invoked if forwarding!");
-  DEBUG(
+  LLVM_DEBUG(
     { //assert not looping
     DSNode* NH = N;
     svset<DSNode*> seen;
@@ -696,7 +696,7 @@ void DSNode::mergeWith(const DSNodeHandle &NH, unsigned Offset) {
   if (N == this) {
     // We cannot merge two pieces of the same node together, collapse the node
     // completely.
-    DEBUG(errs() << "Attempting to merge two chunks of the same node together!\n");
+    LLVM_DEBUG(errs() << "Attempting to merge two chunks of the same node together!\n");
     foldNodeCompletely();
     return;
   }
@@ -1112,8 +1112,8 @@ DSCallSite ReachabilityCloner::cloneCallSite(const DSCallSite& SrcCS) {
 //===----------------------------------------------------------------------===//
 
 // Define here to avoid including iOther.h and BasicBlock.h in DSGraph.h
-const Function &DSCallSite::getCaller() const {
-  return *Site.getInstruction()->getParent()->getParent();
+const Function* DSCallSite::getCaller() const {
+  return Site->getParent()->getParent();
 }
 
 void DSCallSite::InitNH(DSNodeHandle &NH, const DSNodeHandle &Src,
@@ -1124,26 +1124,15 @@ void DSCallSite::InitNH(DSNodeHandle &NH, const DSNodeHandle &Src,
 /// FunctionTypeOfCallSite - Helper method to extract the signature of a function
 /// that is called a given CallSite
 ///
-const FunctionType *DSCallSite::FunctionTypeOfCallSite(const CallSite & Site) {
-  Value *Callee = Site.getCalledValue();
+const FunctionType *DSCallSite::FunctionTypeOfCallSite(const CallBase* Site) {
+  Value *Callee = Site->getCalledOperand();
 
   // Direct call, simple
   if (Function *F = dyn_cast<Function>(Callee))
     return F->getFunctionType();
 
-  // Indirect call, extract the type
-  const FunctionType *CalleeFuncType = NULL;
-
-  const PointerType *CalleeType = dyn_cast<PointerType>(Callee->getType());
-  if (!CalleeType) {
-    assert(0 && "Call through a non-pointer type?");
-  } else {
-    CalleeFuncType = dyn_cast<FunctionType>(CalleeType->getElementType());
-    assert(CalleeFuncType &&
-           "Call through pointer to non-function?");
-  }
-
-  return CalleeFuncType;
+  // Indirect call, no info
+  return nullptr;
 }
 
 /// isVarArg - Determines if the call this represents is to a variable argument
@@ -1371,7 +1360,7 @@ void DataStructures::formGlobalECs() {
   svset<const GlobalValue*> ECGlobals;
   buildGlobalECs(ECGlobals);
   if (!ECGlobals.empty()) {
-    DEBUG(errs() << "Eliminating " << ECGlobals.size() << " EC Globals!\n");
+    LLVM_DEBUG(errs() << "Eliminating " << ECGlobals.size() << " EC Globals!\n");
     for (DSInfoTy::iterator I = DSInfo.begin(),
          E = DSInfo.end(); I != E; ++I)
       eliminateUsesOfECGlobals(*I->second, ECGlobals);
@@ -1415,7 +1404,7 @@ void DataStructures::buildGlobalECs(svset<const GlobalValue*> &ECGlobals) {
     I->addGlobal(First);
   }
 
-  DEBUG(GlobalsGraph->AssertGraphOK());
+  LLVM_DEBUG(GlobalsGraph->AssertGraphOK());
 }
 
 /// EliminateUsesOfECGlobals - Once we have determined that some globals are in
@@ -1466,7 +1455,7 @@ void DataStructures::eliminateUsesOfECGlobals(DSGraph &G,
 #endif
   }
 
-  DEBUG(if(MadeChange) G.AssertGraphOK());
+  LLVM_DEBUG(if(MadeChange) G.AssertGraphOK());
 }
 
 //For Entry Points

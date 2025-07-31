@@ -1,5 +1,5 @@
 project(dsa-seahorn)
-cmake_minimum_required(VERSION 2.8.11)
+cmake_minimum_required(VERSION 3.11)
 
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR )
   message (FATAL_ERROR
@@ -35,40 +35,7 @@ endif ()
 
 ## llvm
 if (TOP_LEVEL)
-  include(ExternalProject)
-  # if top-level, offer to build llvm
-  ExternalProject_Add (llvm
-    SVN_REPOSITORY http://llvm.org/svn/llvm-project/llvm/tags/RELEASE_500/final/
-    SOURCE_DIR ${CMAKE_SOURCE_DIR}/ext/llvm
-    INSTALL_DIR ${CMAKE_BINARY_DIR}/run
-    CMAKE_ARGS
-    -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-    -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
-    -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
-    -DLLVM_TARGETS_TO_BUILD:STRING=X86 -DWITH_POLY:BOOL=OFF
-    -DLLVM_ENABLE_PEDANTIC=OFF 
-    -DLLVM_ENABLE_PIC=ON -DLLVM_REQUIRES_RTTI:BOOL=TRUE
-    -DLLVM_BUILD_LLVM_DYLIB:BOOL=${BUILD_SEA_DSA_LIBS_SHARED}
-    -DLLVM_INCLUDE_TESTS:BOOL=OFF
-    -DLLVM_INCLUDE_GO_TESTS=OFF
-    -DLLVM_INCLUDE_EXAMPLES=OFF
-    -DLLVM_INCLUDE_DOCS=OFF
-    -DLLVM_BINDINGS_LIST=" "    
-    LOG_CONFIGURE 1
-    LOG_BUILD 1
-    LOG_INSTALL 1)
-
-  find_package (LLVM 5.0.0 CONFIG NO_DEFAULT_PATH)
-  if (NOT LLVM_FOUND)
-    ExternalProject_Get_Property (llvm INSTALL_DIR)
-    set (LLVM_ROOT ${INSTALL_DIR})
-    set (LLVM_DIR ${LLVM_ROOT}/lib/cmake/llvm CACHE PATH    
-      "Forced location of LLVM cmake config" FORCE)
-    message (WARNING "No llvm found. Run \n\tcmake --build . && cmake ${CMAKE_SOURCE_DIR}")
-    return()
-  else()
-    set_target_properties(llvm PROPERTIES EXCLUDE_FROM_ALL ON)
-  endif()
+  find_package (LLVM)
   
   message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
   message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -108,8 +75,6 @@ install(DIRECTORY include/
   PATTERN "CMakeFiles" EXCLUDE  
   PATTERN ".svn" EXCLUDE)
 
-
-add_definitions(-std=c++11)
 add_definitions(-Wno-redeclared-class-member -Wno-sometimes-uninitialized)
 add_definitions(-Wno-covered-switch-default)
 

@@ -10,6 +10,7 @@
 // This file implements the core data structure functionality.
 //
 //===----------------------------------------------------------------------===//
+#include <llvm/IR/InstrTypes.h>
 #define DEBUG_TYPE "dsgraph"
 #include "dsa/DSGraphTraits.h"
 #include "dsa/DataStructure.h"
@@ -70,8 +71,8 @@ extern cl::opt<bool> TypeInferenceOptimize;
 // or Crab-llvm
 static bool isVerifierCall(const Function &f) {
   return
-    (f.getName().startswith("verifier.zero_initializer") ||
-     f.getName().startswith("verifier.int_initializer"));
+    (f.getName().starts_with("verifier.zero_initializer") ||
+     f.getName().starts_with("verifier.int_initializer"));
 }
 
 
@@ -103,7 +104,7 @@ static bool shouldHaveNodeForValue(const Value *V) {
 std::string DSGraph::getFunctionNames() const {
   switch (getReturnNodes().size()) {
   case 0: return "Globals graph";
-  case 1: return retnodes_begin()->first->getName();
+  case 1: return retnodes_begin()->first->getName().str();
   default:
     std::string Return;
     for (DSGraph::retnodes_iterator I = retnodes_begin();
@@ -540,16 +541,15 @@ DSCallSite DSGraph::getCallSiteForArguments(const Function &F) const {
     if (isa<PointerType>(I->getType()))
       Args.push_back(getNodeForValue(&*I));
 
-  return DSCallSite(CallSite(), getReturnNodeFor(F), getVANodeFor(F), &F, Args);
+  return DSCallSite(nullptr, getReturnNodeFor(F), getVANodeFor(F), &F, Args);
 }
 
 /// getDSCallSiteForCallSite - Given an LLVM CallSite object that is live in
 /// the context of this graph, return the DSCallSite for it.
-DSCallSite DSGraph::getDSCallSiteForCallSite(CallSite CS) const {
+DSCallSite DSGraph::getDSCallSiteForCallSite(CallBase* CS) const {
   DSNodeHandle RetVal, VarArg;
-  Instruction *I = CS.getInstruction();
-  if (shouldHaveNodeForValue(I))
-    RetVal = getNodeForValue(I);
+  if (shouldHaveNodeForValue(CS))
+    RetVal = getNodeForValue(CS);
 
   //FIXME: Here we trust the signature of the callsite to determine which arguments
   //are var-arg and which are fixed.  Apparently we can't assume this, but I'm not sure
@@ -559,14 +559,14 @@ DSCallSite DSGraph::getDSCallSiteForCallSite(CallSite CS) const {
   
   // Sanity check--this really, really shouldn't happen
   if (!CalleeFuncType->isVarArg())
-    assert(CS.arg_size() == static_cast<unsigned>(NumFixedArgs) &&
+    assert(CS->arg_size() == static_cast<unsigned>(NumFixedArgs) &&
         "Too many arguments/incorrect function signature!");
 
   std::vector<DSNodeHandle> Args;
-  Args.reserve(CS.arg_end()-CS.arg_begin());
+  Args.reserve(CS->arg_end()-CS->arg_begin());
 
   // Calculate the arguments vector...
-  for (CallSite::arg_iterator I = CS.arg_begin(), E = CS.arg_end(); I != E; ++I)
+  for (auto I = CS->arg_begin(), E = CS->arg_end(); I != E; ++I)
     if (isa<PointerType>((*I)->getType())) {
       DSNodeHandle ArgNode; // Initially empty
       if (shouldHaveNodeForValue(*I))
@@ -575,7 +575,7 @@ DSCallSite DSGraph::getDSCallSiteForCallSite(CallSite CS) const {
         ArgNode = getNodeForValue (*I);
       }
       
-      if (I - CS.arg_begin() < NumFixedArgs) {
+      if (I - CS->arg_begin() < NumFixedArgs) {
         Args.push_back(ArgNode);
       } else {
         VarArg.mergeWith(ArgNode);
@@ -588,11 +588,11 @@ DSCallSite DSGraph::getDSCallSiteForCallSite(CallSite CS) const {
   // since CallSite::getCalledFunction() returns 0 if the called value is
   // a bit-casted function constant.
   //
-  if (Function *F=dyn_cast<Function>(CS.getCalledValue()->stripPointerCasts()))
+  if (Function *F=dyn_cast<Function>(CS->getCalledOperand()->stripPointerCasts()))
     return DSCallSite(CS, RetVal, VarArg, F, Args);
   else
     return DSCallSite(CS, RetVal, VarArg,
-                      getNodeForValue(CS.getCalledValue()).getNode(), Args);
+                      getNodeForValue(CS->getCalledOperand()).getNode(), Args);
 }
 
 
@@ -617,8 +617,8 @@ static void markIncompleteNode(DSNode *N) {
 }
 
 static void markIncomplete(DSCallSite &Call) {
-  CallSite CS = Call.getCallSite();
-  Function *callee= CS.getCalledFunction();
+  CallBase* CS = Call.getCallSite();
+  Function *callee= CS->getCalledFunction();
   if (callee && isVerifierCall(*callee))
     return;
   
@@ -715,8 +715,8 @@ static void markExternalNode(DSNode *N, DenseSet<DSNode *> & processedNodes) {
 
 // markExternal --marks the specified callsite external, using 'processedNodes' to track recursion.
 static void markExternal(const DSCallSite &Call, DenseSet<DSNode *> & processedNodes) {
-  CallSite CS = Call.getCallSite();
-  Function *callee= CS.getCalledFunction();
+  CallBase* CS = Call.getCallSite();
+  Function *callee= CS->getCalledFunction();
   if (callee && isVerifierCall(*callee))
     return;
 
@@ -892,7 +892,7 @@ static void removeIdenticalCalls(DSGraph::FunctionListTy &Calls) {
       DSNode *Callee = CS.getCalleeNode();
       if (Callee->getNumReferrers() == 1 && Callee->isCompleteNode() &&
           Callee->isEmptyGlobals()) {  // No useful info?
-        DEBUG(errs() << "WARNING: Useless call site found.\n");
+        LLVM_DEBUG(errs() << "WARNING: Useless call site found.\n");
         I = Calls.erase(I);
         E = Calls.end();
         ++NumDeleted;
@@ -928,7 +928,7 @@ static void removeIdenticalCalls(DSGraph::FunctionListTy &Calls) {
   NumCallNodesMerged += NumDeleted;
 
   if (NumDeleted)
-    DEBUG(errs() << "Merged " << NumDeleted << " call nodes.\n");
+    LLVM_DEBUG(errs() << "Merged " << NumDeleted << " call nodes.\n");
 }
 // removeTriviallyDeadNodes - After the graph has been constructed, this method
 // removes all unreachable nodes that are created because they got merged with
@@ -1073,7 +1073,7 @@ static bool CallSiteUsesAliveArgs(const DSCallSite &CS,
 // This function also clones information about globals back into the globals
 // graph before it deletes the nodes.
 void DSGraph::removeDeadNodes(unsigned Flags) {
-  DEBUG(AssertGraphOK(); if (GlobalsGraph) GlobalsGraph->AssertGraphOK());
+  LLVM_DEBUG(AssertGraphOK(); if (GlobalsGraph) GlobalsGraph->AssertGraphOK());
 
   // Reduce the amount of work we have to do... remove dummy nodes left over by
   // merging...
@@ -1223,7 +1223,7 @@ void DSGraph::removeDeadNodes(unsigned Flags) {
   for (unsigned i = 0, e = DeadNodes.size(); i != e; ++i)
     delete DeadNodes[i];
 
-  DEBUG(AssertGraphOK(); GlobalsGraph->AssertGraphOK());
+  LLVM_DEBUG(AssertGraphOK(); GlobalsGraph->AssertGraphOK());
 }
 
 void DSGraph::AssertNodeContainsGlobal(const DSNode *N, const GlobalValue *GV) const {
@@ -1237,7 +1237,7 @@ void DSGraph::AssertCallSiteInGraph(const DSCallSite &CS) const {
 #if 0
     if (CS.getNumPtrArgs() && CS.getCalleeNode() == CS.getPtrArg(0).getNode() &&
         CS.getCalleeNode() && CS.getCalleeNode()->getGlobals().empty())
-      DEBUG(errs() << "WARNING: WEIRD CALL SITE FOUND!\n");
+      LLVM_DEBUG(errs() << "WARNING: WEIRD CALL SITE FOUND!\n");
 #endif
   }
   AssertNodeInGraph(CS.getRetVal().getNode());
@@ -1503,7 +1503,7 @@ void DSGraph::updateFromGlobalGraph() {
 //  false - The function F cannot be called by the call site.
 //
 bool
-llvm::functionIsCallable (ImmutableCallSite CS, const Function* F) {
+llvm::functionIsCallable (CallBase* CS, const Function* F) {
   //Which targets do we choose?
   //Conservative: all of them
   //Pretty Safe: same calling convention, otherwise undefined behavior
@@ -1512,14 +1512,12 @@ llvm::functionIsCallable (ImmutableCallSite CS, const Function* F) {
   //Safe?: non-vararg call only calling non-vararg functions
   //Safe?: iany/ptr can't be interchanged in args w/ float/double
   //Not so safe: number of args matching
-  const PointerType*  PT = cast<PointerType>(CS.getCalledValue()->getType());
-  const FunctionType* FT = cast<FunctionType>(PT->getElementType());
 
   //
   // If the calling convention doesn't match, then the function cannot be
   // called by this call site.
   //
-  if (!noDSACallConv && CS.getCallingConv() != F->getCallingConv())
+  if (!noDSACallConv && CS->getCallingConv() != F->getCallingConv())
     return false;
 
   //
@@ -1529,42 +1527,17 @@ llvm::functionIsCallable (ImmutableCallSite CS, const Function* F) {
   //
   if (!noDSACallConv) {
     Function::const_arg_iterator farg = F->arg_begin(), fend = F->arg_end();
-    for (unsigned index = 0; index < CS.arg_size() && farg != fend;
+    for (unsigned index = 0; index < CS->arg_size() && farg != fend;
         ++farg, ++index) {
-      if (CS.isByValArgument(index) != farg->hasByValAttr()) {
+      if (CS->isByValArgument(index) != farg->hasByValAttr()) {
         return false;
       }
     }
   }
 
-  //
-  // If the caller and callee don't agree on whether the target is a vararg
-  // function, then the function is not a valid target.
-  //
-  if (!noDSACallVA && FT->isVarArg() != F->isVarArg())
-    return false;
-
-  //
-  // If calling this function from this call site would require an implicit
-  // integer to floating point cast (or vice-versa), then don't consider the
-  // function callable from this call site.
-  //
-  if (!noDSACallFP) {
-    unsigned ANumParams = F->getFunctionType()->getNumParams();
-    unsigned PNumParams = FT->getNumParams();
-    unsigned NumParams = (ANumParams < PNumParams) ? ANumParams : PNumParams;
-    for (unsigned index = 0; index < NumParams; ++index) {
-      Type * AType = F->getFunctionType()->getParamType(index);
-      Type * PType = FT->getParamType(index);
-      if ((AType->isFPOrFPVectorTy() && !PType->isFPOrFPVectorTy())
-          ||
-          (!AType->isFPOrFPVectorTy() && PType->isFPOrFPVectorTy()))
-        return false;
-    }
-  }
   
   if (!noDSACallNumArgs) {
-    if(CS.arg_size() < F->arg_size()) {
+    if(CS->arg_size() < F->arg_size()) {
       return false;
     }
   }
@@ -1606,7 +1579,7 @@ void DSGraph::buildCallGraph(DSCallGraph& DCG, std::vector<const Function*>& Glo
     if (ii->isDirectCall()) {
       DCG.insert(ii->getCallSite(), ii->getCalleeFunc());
     } else {
-      CallSite CS = ii->getCallSite();
+      CallBase* CS = ii->getCallSite();
       std::vector<const Function*> MaybeTargets;
 
       if(ii->getCalleeNode()->isIncompleteNode())
@@ -1634,7 +1607,7 @@ void DSGraph::buildCallGraph(DSCallGraph& DCG, std::vector<const Function*>& Glo
           ++NumFiltered;
       for (DSCallSite::MappedSites_t::iterator I = ii->ms_begin(),
            E = ii->ms_end(); I != E; ++I) {
-        CallSite MCS = *I;
+        CallBase* MCS = *I;
         for (std::vector<const Function*>::iterator Fi = MaybeTargets.begin(),
              Fe = MaybeTargets.end(); Fi != Fe; ++Fi)
           if (!filter || functionIsCallable(MCS, *Fi))
@@ -1657,7 +1630,7 @@ void DSGraph::buildCompleteCallGraph(DSCallGraph& DCG,
        ii != ee; ++ii) {
 
     if (ii->isDirectCall()) continue;
-    CallSite CS = ii->getCallSite();
+    CallBase* CS = ii->getCallSite();
     if (DCG.callee_size(CS) != 0) continue;
     std::vector<const Function*> MaybeTargets;
     MaybeTargets.assign(GlobalFunctionList.begin(), GlobalFunctionList.end());
@@ -1676,7 +1649,7 @@ void DSGraph::buildCompleteCallGraph(DSCallGraph& DCG,
 
     for (DSCallSite::MappedSites_t::iterator I = ii->ms_begin(),
          E = ii->ms_end(); I != E; ++I) {
-      CallSite MCS = *I;
+      CallBase* MCS = *I;
       for (std::vector<const Function*>::iterator Fi = MaybeTargets.begin(),
            Fe = MaybeTargets.end(); Fi != Fe; ++Fi) {
         if (!filter || functionIsCallable(MCS, *Fi))

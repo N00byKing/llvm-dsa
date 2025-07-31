@@ -33,9 +33,9 @@ public:
   AddressTakenAnalysis() : ModulePass (ID) {}
   virtual ~AddressTakenAnalysis();
 
-  bool runOnModule(llvm::Module&);
+  bool runOnModule(llvm::Module&) override;
 
-  virtual void getAnalysisUsage(llvm::AnalysisUsage &Info) const;
+  virtual void getAnalysisUsage(llvm::AnalysisUsage &Info) const override;
 
   bool hasAddressTaken(llvm::Function *);
 

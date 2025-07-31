@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <llvm/IR/InstrTypes.h>
 #define DEBUG_TYPE "dsa-local"
 
 #include "dsa/DataStructure.h"
@@ -19,7 +20,6 @@
 
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -139,9 +139,9 @@ namespace {
     void visitInvokeInst(InvokeInst &II);
     void visitInstruction(Instruction &I);
 
-    bool visitIntrinsic(CallSite CS, Function* F);
-    void visitCallSite(CallSite CS);
-    void visitVAStart(CallSite CS);
+    bool visitIntrinsic(CallBase* CS, Function* F);
+    void visitCallSite(CallBase* CS);
+    void visitVAStart(CallBase* CS);
     void visitVAStartNode(DSNode* N);
 
   public:
@@ -515,11 +515,6 @@ void GraphBuilder::visitReturnInst(ReturnInst &RI) {
 }
 
 void GraphBuilder::visitVAArgInst(VAArgInst &I) {
-  Module *M = FB->getParent();
-  Triple TargetTriple(M->getTargetTriple());
-  Triple::ArchType Arch = TargetTriple.getArch();
-  switch(Arch) {
-  case Triple::x86_64: {
     // On x86_64, we have va_list as a struct {i32, i32, i8*, i8* }
     // The first i8* is where arguments generally go, but the second i8* can
     // be used also to pass arguments by register.
@@ -536,27 +531,6 @@ void GraphBuilder::visitVAArgInst(VAArgInst &I) {
 
     if (isa<PointerType>(I.getType()))
       Dest.mergeWith(Ptr);
-    return; 
-  }
-
-  default: {
-    assert(0 && "What frontend generates this?");
-    DSNodeHandle Ptr = getValueDest(I.getOperand(0));
-
-    //FIXME: also updates the argument
-    if (Ptr.isNull()) return;
-
-    // Make that the node is read and written
-    Ptr.getNode()->setReadMarker()->setModifiedMarker();
-
-    // Ensure a type record exists.
-    DSNode *PtrN = Ptr.getNode();
-    PtrN->mergeTypeInfo(I.getType(), Ptr.getOffset());
-
-    if (isa<PointerType>(I.getType()))
-      setDestTo(I, getLink(Ptr));
-  }
-  }
 }
 
 void GraphBuilder::visitIntToPtrInst(IntToPtrInst &I) {
@@ -644,12 +618,7 @@ unsigned getValueOffset(Type *Ty, ArrayRef<unsigned> Idxs,
       // Update Ty to refer to current element
       Ty = STy->getElementType(FieldNo);
     } else {
-      // Update Ty to refer to current element
-      Ty = cast<SequentialType>(Ty)->getElementType();
-
-      // Get the array index and the size of each array element.
-      int64_t arrayIdx = *I;
-      Offset += (uint64_t)arrayIdx * TD.getTypeAllocSize(Ty);
+      // Probably pointer ty, cant do anything
     }
   }
   return Offset;
@@ -814,105 +783,6 @@ void GraphBuilder::visitGetElementPtrInst(User &GEP) {
         Offset = 0;
         break;
       }
-    } else if (const PointerType *PtrTy = dyn_cast<PointerType>(I.getIndexedType())) {
-      // Get the type pointed to by the pointer
-      Type *CurTy = PtrTy->getElementType();
-
-      //
-      // Some LLVM transforms lower structure indexing into byte-level
-      // indexing.  Try to recognize forms of that here.
-      // E.g., p->f = x; 
-      // can be transformed into 
-      //       (*type of f) ((char*) p + offset of f) = x; 
-      //
-      Type * Int8Type  = Type::getInt8Ty(CurTy->getContext());
-      ConstantInt * IS = dyn_cast<ConstantInt>(I.getOperand());
-      if (IS &&
-          (NodeH.getOffset() == 0) &&
-          (CurTy == Int8Type)) {
-        // Calculate the offset of the field
-        Offset += IS->getSExtValue() * TD.getTypeAllocSize (Int8Type);
-
-        //
-        // Grow the DSNode size as needed.
-        //
-        unsigned requiredSize = Offset + TD.getTypeAllocSize (Int8Type);
-        if (NodeH.getNode()->getSize() < requiredSize){
-          if (!(NodeH.getNode()->isArrayNode())) {
-            NodeH.getNode()->growSize (requiredSize);
-          } else {
-            assert (NodeH.getNode()->getSize() > 0);
-
-            NodeH.getNode()->foldNodeCompletely();
-            NodeH.getNode();
-            Offset = 0;
-            break;
-          }
-        }
-
-        // Add in the offset calculated...
-        NodeH.setOffset(NodeH.getOffset()+Offset);
-
-        // Check the offset
-        DSNode *N = NodeH.getNode();
-        if (N) N->checkOffsetFoldIfNeeded(NodeH.getOffset());
-
-        // NodeH is now the pointer we want to GEP to be...
-        setDestTo(GEP, NodeH);
-        return;
-      }
-
-      //
-      // Unless we're advancing the pointer by zero bytes via array indexing,
-      // fold the node (i.e., mark it type-unknown) and indicate that we're
-      // indexing zero bytes into the object (because all fields are aliased).
-      //
-      // Note that we break out of the loop if we fold the node.  Once
-      // something is folded, all values within it are considered to alias.
-      //
-      if (!isa<Constant>(I.getOperand()) ||
-          !cast<Constant>(I.getOperand())->isNullValue()) {
-
-        //
-        // Treat the memory object (DSNode) as an array.
-        //
-        NodeH.getNode()->setArrayMarker();
-
-        //
-        // Ensure that the DSNode's size is large enough to contain one
-        // element of the type to which the pointer points.
-        //
-        if (!isa<ArrayType>(CurTy) && NodeH.getNode()->getSize() <= 0){
-	  // JN: in some cases CurTy is not sized so getTypeAllocSize fails.
-	  if (CurTy->isSized()) {
-	    NodeH.getNode()->growSize(TD.getTypeAllocSize(CurTy));
-	  }
-        } else if (isa<ArrayType>(CurTy) && NodeH.getNode()->getSize() <= 0){
-          Type *ETy = (cast<ArrayType>(CurTy))->getElementType();
-          while (isa<ArrayType>(ETy)) {
-            ETy = (cast<ArrayType>(ETy))->getElementType();
-          }
-          NodeH.getNode()->growSize(TD.getTypeAllocSize(ETy));
-        }
-
-        //
-        // Fold the DSNode if we're indexing into it in a type-incompatible
-        // manner.  That can occur if:
-        //  1) The DSNode represents a pointer into the object at a non-zero
-        //     offset.
-        //  2) The offset of the pointer is already non-zero.
-        //  3) The size of the array element does not match the size into which
-        //     the pointer indexing is indexing
-        if (NodeH.getOffset() || Offset != 0 ||
-            (!isa<ArrayType>(CurTy) &&
-             (!CurTy->isSized() /* Added by JN*/ ||
-	      (NodeH.getNode()->getSize() != TD.getTypeAllocSize(CurTy))))) {
-          NodeH.getNode()->foldNodeCompletely();
-          NodeH.getNode();
-          Offset = 0;
-          break;
-        }
-      }
     }
 
   // Add in the offset calculated...
@@ -935,12 +805,12 @@ void GraphBuilder::visitInvokeInst(InvokeInst &II) {
   visitCallSite(&II);
 }
 
-void GraphBuilder::visitVAStart(CallSite CS) {
+void GraphBuilder::visitVAStart(CallBase* CS) {
   // Build out DSNodes for the va_list depending on the target arch
   // And assosiate the right node with the VANode for this function
   // so it can be merged with the right arguments from callsites
 
-  DSNodeHandle RetNH = getValueDest(CS.getArgument(0));
+  DSNodeHandle RetNH = getValueDest(CS->getArgOperand(0));
 
   if (DSNode *N = RetNH.getNode())
     visitVAStartNode(N);
@@ -951,8 +821,6 @@ void GraphBuilder::visitVAStartNode(DSNode* N) {
   assert(FB && "No function for this graph?");
   Module *M = FB->getParent();
   assert(M && "No module for function");
-  Triple TargetTriple(M->getTargetTriple());
-  Triple::ArchType Arch = TargetTriple.getArch();
 
   // Fetch the VANode associated with the func containing the call to va_start
   DSNodeHandle & VANH = G.getVANodeFor(*FB);
@@ -972,15 +840,6 @@ void GraphBuilder::visitVAStartNode(DSNode* N) {
 
   // For the architectures we support, build dsnodes that match
   // how we know va_list is used.
-  switch (Arch) {
-  case Triple::x86:
-    // On x86, we have:
-    // va_list as a pointer to an array of pointers to the variable arguments
-    if (N->getSize() < 1)
-      N->growSize(1);
-    N->setLink(0, VAArray);
-    break;
-  case Triple::x86_64:
     // On x86_64, we have va_list as a struct {i32, i32, i8*, i8* }
     // The first i8* is where arguments generally go, but the second i8* can
     // be used also to pass arguments by register.
@@ -990,18 +849,6 @@ void GraphBuilder::visitVAStartNode(DSNode* N) {
       N->growSize(24); //sizeof the va_list struct mentioned above
     N->setLink(8,VAArray); //first i8*
     N->setLink(16,VAArray); //second i8*
-
-    break;
-  default:
-    // FIXME: For now we abort if we don't know how to handle this arch
-    // Either add support for other architectures, or at least mark the
-    // nodes unknown/incomplete or whichever results in the correct
-    // conservative behavior in the general case
-    assert(0 && "VAstart not supported on this architecture!");
-    //XXX: This might be good enough in those cases that we don't know
-    //what the arch does
-    N->setIncompleteMarker()->setUnknownMarker()->foldNodeCompletely();
-  }
 
   // XXX: We used to set the alloca marker for the DSNode passed to va_start.
   // Seems to me that you could allocate the va_list on the heap, so ignoring
@@ -1023,13 +870,13 @@ void GraphBuilder::visitVAStartNode(DSNode* N) {
 ///   true  - This intrinsic is properly handled by this method.
 ///   false - This intrinsic is not recognized by DSA.
 ///
-bool GraphBuilder::visitIntrinsic(CallSite CS, Function *F) {
+bool GraphBuilder::visitIntrinsic(CallBase* CS, Function *F) {
   ++NumIntrinsicCall;
 
   //
   // If this is a debug intrinsic, then don't do any special processing.
   //
-  if (isa<DbgInfoIntrinsic>(CS.getInstruction()))
+  if (isa<DbgInfoIntrinsic>(CS))
     return true;
 
   switch (F->getIntrinsicID()) {
@@ -1043,8 +890,8 @@ bool GraphBuilder::visitIntrinsic(CallSite CS, Function *F) {
     // the va_list, and so isn't a big deal.  In theory we would build a
     // separate graph for this (like the one created in visitVAStartNode)
     // and only merge the node containing the variable arguments themselves.
-    DSNodeHandle destNH = getValueDest(CS.getArgument(0));
-    DSNodeHandle srcNH = getValueDest(CS.getArgument(1));
+    DSNodeHandle destNH = getValueDest(CS->getArgOperand(0));
+    DSNodeHandle srcNH = getValueDest(CS->getArgOperand(1));
     destNH.mergeWith(srcNH);
     return true;
   }
@@ -1052,11 +899,11 @@ bool GraphBuilder::visitIntrinsic(CallSite CS, Function *F) {
     DSNode * Node = createNode();
     Node->setAllocaMarker()->setIncompleteMarker()->setUnknownMarker();
     Node->foldNodeCompletely();
-    setDestTo (*(CS.getInstruction()), Node);
+    setDestTo (*(CS), Node);
     return true;
   }
   case Intrinsic::stackrestore:
-    getValueDest(CS.getInstruction()).getNode()->setAllocaMarker()
+    getValueDest(CS).getNode()->setAllocaMarker()
       ->setIncompleteMarker()
       ->setUnknownMarker()
       ->foldNodeCompletely();
@@ -1068,15 +915,15 @@ bool GraphBuilder::visitIntrinsic(CallSite CS, Function *F) {
   case Intrinsic::memmove: {
     // Merge the first & second arguments, and mark the memory read and
     // modified.
-    DSNodeHandle RetNH = getValueDest(CS.getArgument(0));
-    RetNH.mergeWith(getValueDest(CS.getArgument(1)));
+    DSNodeHandle RetNH = getValueDest(CS->getArgOperand(0));
+    RetNH.mergeWith(getValueDest(CS->getArgOperand(1)));
     if (DSNode *N = RetNH.getNode())
       N->setModifiedMarker()->setReadMarker();
     return true;
   }
   case Intrinsic::memset:
     // Mark the memory modified.
-    if (DSNode *N = getValueDest(CS.getArgument(0)).getNode())
+    if (DSNode *N = getValueDest(CS->getArgOperand(0)).getNode())
       N->setModifiedMarker();
     return true;
 
@@ -1106,7 +953,7 @@ bool GraphBuilder::visitIntrinsic(CallSite CS, Function *F) {
 #endif
 
   case Intrinsic::eh_typeid_for: {
-    DSNodeHandle Ptr = getValueDest(CS.getArgument(0));
+    DSNodeHandle Ptr = getValueDest(CS->getArgOperand(0));
     Ptr.getNode()->setReadMarker();
     Ptr.getNode()->setIncompleteMarker();
     return true;
@@ -1128,7 +975,7 @@ bool GraphBuilder::visitIntrinsic(CallSite CS, Function *F) {
     DSNode * Node = createNode();
     Node->setAllocaMarker()->setIncompleteMarker()->setUnknownMarker();
     Node->foldNodeCompletely();
-    setDestTo (*(CS.getInstruction()), Node);
+    setDestTo (*(CS), Node);
     return true;
   }
 
@@ -1151,18 +998,18 @@ bool GraphBuilder::visitIntrinsic(CallSite CS, Function *F) {
         return true;
     }
 
-    DEBUG(errs() << "[dsa:local] Unhandled intrinsic: " << F->getName() << "\n");
+    LLVM_DEBUG(errs() << "[dsa:local] Unhandled intrinsic: " << F->getName() << "\n");
     assert(0 && "Unhandled intrinsic");
     return false;
   }
   }
 }
 
-void GraphBuilder::visitCallSite(CallSite CS) {
+void GraphBuilder::visitCallSite(CallBase* CS) {
   //
   // Get the called value.  Strip off any casts which are lossless.
   //
-  Value *Callee = CS.getCalledValue()->stripPointerCasts();
+  Value *Callee = CS->getCalledOperand()->stripPointerCasts();
 
   // Special case handling of certain libc allocation functions here.
   if (Function *F = dyn_cast<Function>(Callee))
@@ -1173,12 +1020,12 @@ void GraphBuilder::visitCallSite(CallSite CS) {
   if (isa<InlineAsm> (Callee)) {
     ++NumAsmCall;
     DSNodeHandle RetVal;
-    Instruction *I = CS.getInstruction();
+    Instruction *I = CS;
     if (isa<PointerType > (I->getType()))
       RetVal = getValueDest(I);
 
     // Calculate the arguments vector...
-    for (CallSite::arg_iterator I = CS.arg_begin(), E = CS.arg_end(); I != E; ++I)
+    for (auto I = CS->arg_begin(), E = CS->arg_end(); I != E; ++I)
       if (isa<PointerType > ((*I)->getType()))
         RetVal.mergeWith(getValueDest(*I));
     if (!RetVal.isNull())
@@ -1188,7 +1035,7 @@ void GraphBuilder::visitCallSite(CallSite CS) {
 
   // Set up the return value...
   DSNodeHandle RetVal;
-  Instruction *I = CS.getInstruction();
+  Instruction *I = CS;
   if (isa<PointerType>(I->getType()))
     RetVal = getValueDest(I);
 
@@ -1196,7 +1043,7 @@ void GraphBuilder::visitCallSite(CallSite CS) {
   if (!isa<Function>(Callee)) {
     CalleeNode = getValueDest(Callee).getNode();
     if (CalleeNode == 0) {
-      DEBUG(errs() << "WARNING: Program is calling through a null pointer?\n" << *I);
+      LLVM_DEBUG(errs() << "WARNING: Program is calling through a null pointer?\n" << *I);
       return;  // Calling a null pointer?
     }
   }
@@ -1214,20 +1061,20 @@ void GraphBuilder::visitCallSite(CallSite CS) {
 
   // Sanity check--this really, really shouldn't happen
   if (!CalleeFuncType->isVarArg())
-    assert(CS.arg_size() == static_cast<unsigned>(NumFixedArgs) &&
+    assert(CS->arg_size() == static_cast<unsigned>(NumFixedArgs) &&
            "Too many arguments/incorrect function signature!");
 
   std::vector<DSNodeHandle> Args;
-  Args.reserve(CS.arg_size());
+  Args.reserve(CS->arg_size());
   DSNodeHandle VarArgNH;
 
   // Calculate the arguments vector...
   // Add all fixed pointer arguments, then merge the rest together
-  for (CallSite::arg_iterator I = CS.arg_begin(), E = CS.arg_end();
+  for (auto I = CS->arg_begin(), E = CS->arg_end();
        I != E; ++I)
     if (isa<PointerType>((*I)->getType())) {
       DSNodeHandle ArgNode = getValueDest(*I);
-      if (I - CS.arg_begin() < NumFixedArgs) {
+      if (I - CS->arg_begin() < NumFixedArgs) {
         Args.push_back(ArgNode);
       } else {
         VarArgNH.mergeWith(ArgNode);
@@ -1362,7 +1209,7 @@ GraphBuilder::MergeConstantInitIntoNode(DSNodeHandle &NH,
         // If this is one of those cute structures that ends with a zero-length
         // array, just fold the DSNode now and get it over with.
         //
-        DEBUG(errs() << "Zero size element at end of struct\n" );
+        LLVM_DEBUG(errs() << "Zero size element at end of struct\n" );
         NHN->foldNodeCompletely();
       } else {
         assert(0 && "type was smaller than offsets of struct layout indicate");
@@ -1392,24 +1239,9 @@ void GraphBuilder::mergeInGlobalInitializer(GlobalVariable *GV) {
   DSNodeHandle NH = getValueDest(GV);
 
   //
-  // Ensure that the DSNode is large enough to hold the new constant that we'll
-  // be adding to it.
-  //
-  Type * ElementType = GV->getType()->getElementType();
-  while(ArrayType *ATy = dyn_cast<ArrayType>(ElementType)) {
-    ElementType = ATy->getElementType();
-  }
-  if(!NH.getNode()->isNodeCompletelyFolded()) {
-    unsigned requiredSize = TD.getTypeAllocSize(ElementType) + NH.getOffset();
-    if (NH.getNode()->getSize() < requiredSize){
-      NH.getNode()->growSize (requiredSize);
-    }
-  }
-
-  //
   // Do the actual merging in of the constant initializer.
   //
-  MergeConstantInitIntoNode(NH, GV->getType()->getElementType(), GV->getInitializer());
+  MergeConstantInitIntoNode(NH, GV->getType(), GV->getInitializer());
 
 }
 
@@ -1449,7 +1281,7 @@ void handleMagicSections(DSGraph* GlobalsGraph, Module& M) {
           DSNodeHandle& DHV = GlobalsGraph->getNodeForValue(V);
           for (svset<Value*>::iterator SI = inSection.begin(),
                SE = inSection.end(); SI != SE; ++SI) {
-            DEBUG(errs() << "Merging " << V->getName().str() << " with "
+            LLVM_DEBUG(errs() << "Merging " << V->getName().str() << " with "
                   << (*SI)->getName().str() << "\n");
             GlobalsGraph->getNodeForValue(*SI).mergeWith(DHV);
           }
@@ -1523,7 +1355,7 @@ bool LocalDataStructures::runOnModule(Module &M) {
                        DSGraph::DontCloneAuxCallNodes |
                        DSGraph::StripAllocaBit);
       formGlobalECs();
-      DEBUG(G->AssertGraphOK());
+      LLVM_DEBUG(G->AssertGraphOK());
     }
 
   //GlobalsGraph->removeTriviallyDeadNodes();

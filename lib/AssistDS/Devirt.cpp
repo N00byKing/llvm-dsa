@@ -7,6 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <llvm/IR/InstrTypes.h>
+#include <llvm/Support/Casting.h>
 #define DEBUG_TYPE "devirt"
 
 #include "assistDS/Devirt.h"
@@ -61,13 +63,13 @@ castTo (Value * V, Type * Ty, std::string Name, Instruction * InsertPt) {
   if (V->getType() == Ty)
     return V;
 
-  //
-  // If it's a constant, just create a constant expression.
-  //
-  if (Constant * C = dyn_cast<Constant>(V)) {
-    Constant * CE = ConstantExpr::getZExtOrBitCast (C, Ty);
-    return CE;
-  }
+  // //
+  // // If it's a constant, just create a constant expression.
+  // //
+  // if (Constant * C = dyn_cast<Constant>(V)) {
+  //   Constant * CE = ConstantExpr::getZExtOrBitCast (C, Ty);
+  //   return CE;
+  // }
 
   //
   // Otherwise, insert a cast instruction.
@@ -88,7 +90,7 @@ castTo (Value * V, Type * Ty, std::string Name, Instruction * InsertPt) {
 //  returned.
 //
 const Function *
-Devirtualize::findInCache (const CallSite & CS,
+Devirtualize::findInCache (const CallBase* CS,
                            std::set<const Function*>& Targets) {
   //
   // Iterate through all of the existing bounce functions to see if one of them
@@ -103,11 +105,11 @@ Devirtualize::findInCache (const CallSite & CS,
     const Function * bounceFunc = I->first;
 
     // Check the return type
-    if (CS.getType() != bounceFunc->getReturnType())
+    if (CS->getType() != bounceFunc->getReturnType())
       continue;
 
     // Check the type of the function pointer and the arguments
-    if (CS.getCalledValue()->stripPointerCasts()->getType() !=
+    if (CS->getCalledOperand()->stripPointerCasts()->getType() !=
         bounceFunc->arg_begin()->getType())
       continue;
 
@@ -135,7 +137,7 @@ Devirtualize::findInCache (const CallSite & CS,
 //  matches.
 //
 Function*
-Devirtualize::buildBounce (CallSite CS, std::vector<const Function*>& Targets) {
+Devirtualize::buildBounce (CallBase* CS, std::vector<const Function*>& Targets) {
   //
   // Update the statistics on the number of bounce functions added to the
   // module.
@@ -147,17 +149,17 @@ Devirtualize::buildBounce (CallSite CS, std::vector<const Function*>& Targets) {
   // an additional pointer argument at the beginning of its argument list that
   // will be the function to call.
   //
-  Value* ptr = CS.getCalledValue();
+  Value* ptr = CS->getCalledOperand();
   std::vector<Type *> TP;
   TP.insert (TP.begin(), ptr->getType());
-  for (CallSite::arg_iterator i = CS.arg_begin();
-       i != CS.arg_end();
+  for (auto i = CS->arg_begin();
+       i != CS->arg_end();
        ++i) {
     TP.push_back ((*i)->getType());
   }
 
-  FunctionType* NewTy = FunctionType::get(CS.getType(), TP, false);
-  Module * M = CS.getInstruction()->getParent()->getParent()->getParent();
+  FunctionType* NewTy = FunctionType::get(CS->getType(), TP, false);
+  Module * M = CS->getParent()->getParent()->getParent();
   Function* F = Function::Create (NewTy,
                                   GlobalValue::InternalLinkage,
                                   "devirtbounce",
@@ -199,7 +201,7 @@ Devirtualize::buildBounce (CallSite CS, std::vector<const Function*>& Targets) {
                                           BL);
 
     // Add the return instruction for the basic block
-    if (CS.getType()->isVoidTy())
+    if (CS->getType()->isVoidTy())
       ReturnInst::Create (M->getContext(), BL);
     else
       ReturnInst::Create (M->getContext(), directCall, BL);
@@ -289,7 +291,7 @@ Devirtualize::buildBounce (CallSite CS, std::vector<const Function*>& Targets) {
 //     already been acquired by the class.
 //
 void
-Devirtualize::makeDirectCall (CallSite & CS) {
+Devirtualize::makeDirectCall (CallBase* CS) {
   //
   // Find the targets of the indirect function call.
   //
@@ -320,7 +322,7 @@ Devirtualize::makeDirectCall (CallSite & CS) {
     //
     // Replace the original call with a call to the bounce function.
     //
-    if (CallInst* CI = dyn_cast<CallInst>(CS.getInstruction())) {
+    if (CallInst* CI = dyn_cast<CallInst>(CS)) {
       // The last operand in the op list is the callee
       // std::vector<Value*> Params (CI->op_begin(), CI->op_end());
       std::vector<Value*> Params;
@@ -335,7 +337,7 @@ Devirtualize::makeDirectCall (CallSite & CS) {
 
       CI->replaceAllUsesWith(CN);
       CI->eraseFromParent();
-    } else if (InvokeInst* CI = dyn_cast<InvokeInst>(CS.getInstruction())) {
+    } else if (InvokeInst* CI = dyn_cast<InvokeInst>(CS)) {
       std::vector<Value*> Params (CI->op_begin(), CI->op_end());
       std::string name = CI->hasName() ? CI->getName().str() + ".dv" : "";
       InvokeInst* CN = InvokeInst::Create(const_cast<Function*>(NF),
@@ -365,11 +367,11 @@ Devirtualize::makeDirectCall (CallSite & CS) {
 //  transformation into a direct call.
 //
 void
-Devirtualize::visitCallSite (CallSite &CS) {
+Devirtualize::visitCallSite (CallBase* CS) {
   //
   // First, determine if this is a direct call.  If so, then just ignore it.
   //
-  Value * CalledValue = CS.getCalledValue();
+  Value * CalledValue = CS->getCalledOperand();
   if (isa<Function>(CalledValue->stripPointerCasts()))
     return;
 
@@ -379,7 +381,7 @@ Devirtualize::visitCallSite (CallSite &CS) {
   // for which we know all of the call targets).
   //
   if (!(CTF->isComplete(CS))) {
-    errs () << "Warning: " << *(CS.getInstruction()) << " is an indirect call\n"
+    errs () << "Warning: " << CS << " is an indirect call\n"
 	    << "Skipped indirect call because we don't know all the call targets\n";
     return;
   }
@@ -388,7 +390,7 @@ Devirtualize::visitCallSite (CallSite &CS) {
   // This is an indirect call site.  Put it in the worklist of call sites to
   // transforms.
   //
-  Worklist.push_back (CS.getInstruction());
+  Worklist.push_back (CS);
   return;
 }
 
@@ -423,7 +425,7 @@ Devirtualize::runOnModule (Module & M) {
   //
   for (unsigned index = 0; index < Worklist.size(); ++index) {
     // Autobots, transform (the call site)!
-    CallSite CS (Worklist[index]);
+    CallBase* CS = dyn_cast<CallBase>(Worklist[index]);
     makeDirectCall (CS);
   }
 

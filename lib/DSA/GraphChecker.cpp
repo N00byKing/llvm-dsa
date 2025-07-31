@@ -174,7 +174,7 @@ void DSGC::verify(const DSGraph* G) {
     for (DSGraph::ScalarMapTy::const_iterator I = SM.begin(), E = SM.end();
          I != E; ++I)
       if (I->first->hasName() && I->second.getNode()) {
-        const std::string &Name = I->first->getName();
+        const std::string &Name = I->first->getName().str();
         DSNode *N = I->second.getNode();
 
         // Verify it is not collapsed if it is not supposed to be...

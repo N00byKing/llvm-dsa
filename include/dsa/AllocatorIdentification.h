@@ -12,6 +12,7 @@
 #ifndef _ALLOCATORIDENTIFICATION_H
 #define	_ALLOCATORIDENTIFICATION_H
 
+#include <set>
 #include <string>
 #include "llvm/Pass.h"
 #include "llvm/IR/Value.h"
@@ -44,9 +45,9 @@ namespace llvm {
     static char ID;
     AllocIdentify();
     virtual ~AllocIdentify();
-    bool runOnModule(llvm::Module&);
-    virtual void getAnalysisUsage(llvm::AnalysisUsage &Info) const;
-    virtual StringRef getPassName() const {
+    bool runOnModule(llvm::Module&) override;
+    virtual void getAnalysisUsage(llvm::AnalysisUsage &Info) const override;
+    virtual StringRef getPassName() const override {
       return "Allocator Identification Analysis (find malloc/free wrappers)";
     }
   };

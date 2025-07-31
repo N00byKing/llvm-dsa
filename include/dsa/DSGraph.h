@@ -606,7 +606,7 @@ public:
 
   /// getDSCallSiteForCallSite - Given an LLVM CallSite object that is live in
   /// the context of this graph, return the DSCallSite for it.
-  DSCallSite getDSCallSiteForCallSite(CallSite CS) const;
+  DSCallSite getDSCallSiteForCallSite(CallBase* CS) const;
 
   // Methods for checking to make sure graphs are well formed...
   void AssertNodeInGraph(const DSNode *N) const {
@@ -707,7 +707,7 @@ public:
 //  false - The function F cannot be called by the call site.
 //
 bool
-functionIsCallable (ImmutableCallSite CS, const Function* F);
+functionIsCallable (CallBase* CS, const Function* F);
 
 } // End llvm namespace
 

@@ -255,7 +255,7 @@ namespace
     // that it will have an additional pointer argument at the
     // beginning of its argument list that will be the function to
     // call.
-    Value* ptr = CS.getCalledValue();
+    Value* ptr = CS->getCalledOperand();
     SmallVector<Type*, 8> TP;
     TP.push_back (ptr->getType ());
     for (auto i = CS.arg_begin(), e = CS.arg_end (); i != e; ++i) 

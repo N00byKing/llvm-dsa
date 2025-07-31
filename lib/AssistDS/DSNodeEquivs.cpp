@@ -71,7 +71,7 @@ FunctionList DSNodeEquivs::getCallees(CallSite &CS) {
 
   // If the called function is casted from one function type to another, peer
   // into the cast instruction and pull out the actual function being called.
-  if (ConstantExpr *CExpr = dyn_cast<ConstantExpr>(CS.getCalledValue())) {
+  if (ConstantExpr *CExpr = dyn_cast<ConstantExpr>(CS->getCalledOperand())) {
     if (CExpr->getOpcode() == Instruction::BitCast &&
         isa<Function>(CExpr->getOperand(0)))
       CalledFunc = cast<Function>(CExpr->getOperand(0));
@@ -101,7 +101,7 @@ FunctionList DSNodeEquivs::getCallees(CallSite &CS) {
   if (Callees.empty()) {
     Instruction *Inst = CS.getInstruction();
     Function *Parent = Inst->getParent()->getParent();
-    Value *CalledValue = CS.getCalledValue();
+    Value *CalledValue = CS->getCalledOperand();
     DSNodeHandle &NH = TDDS.getDSGraph(*Parent)->getNodeForValue(CalledValue);
 
     if (!NH.isNull()) {
@@ -111,7 +111,7 @@ FunctionList DSNodeEquivs::getCallees(CallSite &CS) {
   }
 
   // For debugging, dump out the callsites we are unable to get callees for.
-  DEBUG(
+  LLVM_DEBUG(
   if (Callees.empty()) {
     errs() << "Failed to get callees for callsite:\n";
     CS.getInstruction()->dump();

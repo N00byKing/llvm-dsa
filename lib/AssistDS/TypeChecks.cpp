@@ -1510,7 +1510,7 @@ bool TypeChecks::visitCallSite(Module &M, CallSite CS) {
   //
   // Get the called value.  Strip off any casts which are lossless.
   //
-  Value *Callee = CS.getCalledValue()->stripPointerCasts();
+  Value *Callee = CS->getCalledOperand()->stripPointerCasts();
   Instruction *I = CS.getInstruction();
 
   // Special case handling of certain libc allocation functions here.

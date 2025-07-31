@@ -22,7 +22,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/InstrTypes.h"
 
 #include <fstream>
 #include <set>
@@ -39,7 +39,7 @@ static bool isAddressTaken(Value* V) {
     User *U = I->getUser ();
     if(isa<StoreInst>(U))
       return true;
-    if (!isa<CallInst>(U) && !isa<InvokeInst>(U)) {
+    if (!isa<CallBase>(U)) {
       if(U->use_empty())
         continue;
       if(isa<GlobalAlias>(U)) {
@@ -59,8 +59,8 @@ static bool isAddressTaken(Value* V) {
       // FIXME: Can be more robust here for weak aliases that 
       // are never used
     } else {
-      llvm::CallSite CS(cast<Instruction>(U));
-      if (!CS.isCallee(&*I))
+      llvm::CallBase* CS = dyn_cast<CallBase>(U);
+      if (!CS->isCallee(&*I))
         return true;
     }
   }
