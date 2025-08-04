@@ -111,7 +111,7 @@ template <> struct GraphTraits<DSGraph*> {
   //typedef mapped_iterator<DSGraph::node_iterator, DerefFun> nodes_iterator;
 
   template<class T>
-  struct TakeAddress: public std::unary_function<T&, T*> {
+  struct TakeAddress: public std::function<T*(T&)> {
     T* operator()(T &e) { return (&e);}
   };
   
@@ -139,7 +139,7 @@ template <> struct GraphTraits<const DSGraph*> {
   //typedef DSGraph::node_const_iterator nodes_iterator;
 
   template<class T>
-  struct TakeAddress : public std::unary_function<const T&, const T*> {
+  struct TakeAddress : public std::function<const T*(const T&)> {
     const T* operator()(const T &e) const { return (&e);}
   };
 

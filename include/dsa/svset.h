@@ -23,10 +23,6 @@ public:
   typedef Compare key_compare;
   typedef Compare value_compare;
   typedef Alloc   allocator_type;
-  typedef typename Alloc::reference reference;
-  typedef typename Alloc::const_reference const_reference;
-  typedef typename Alloc::pointer pointer;
-  typedef typename Alloc::const_pointer const_pointer;
   typedef typename internal_type::const_iterator const_iterator;
   typedef typename internal_type::iterator iterator;
   typedef typename internal_type::reverse_iterator reverse_iterator;

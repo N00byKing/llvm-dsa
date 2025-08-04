@@ -21,5 +21,6 @@ add_library (DSA STATIC
   SanityCheck.cpp
   Steensgaard.cpp
 )
+set_property(TARGET DSA PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 install(TARGETS DSA ARCHIVE DESTINATION lib)

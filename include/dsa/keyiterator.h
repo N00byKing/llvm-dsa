@@ -21,7 +21,7 @@
 // select1st and select2nd are extensions: they are not part of the standard.
 
 template <class _Pair>
-class _Select1st : public std::unary_function<_Pair, typename _Pair::first_type> {
+class _Select1st : public std::function<typename _Pair::first_type(_Pair)> {
 public:
 
   const typename _Pair::first_type & operator()(const _Pair& __x) const {
