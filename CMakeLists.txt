@@ -27,7 +27,7 @@ if (TOP_LEVEL)
     set (Boost_NO_SYSTEM_PATHS "ON")
   endif()
 
-  find_package (Boost 1.55)
+  find_package(Boost)
   if (Boost_FOUND)
     include_directories (${Boost_INCLUDE_DIRS})
   endif ()
@@ -35,7 +35,7 @@ endif ()
 
 ## llvm
 if (TOP_LEVEL)
-  find_package (LLVM)
+  find_package(LLVM)
   
   message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
   message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -82,5 +82,4 @@ if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
   add_definitions( -Wno-unused-local-typedefs)
 endif ()
 
-add_subdirectory (lib/AssistDS)
 add_subdirectory (lib/DSA)
