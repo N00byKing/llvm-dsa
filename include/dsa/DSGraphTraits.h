@@ -20,12 +20,28 @@
 #include "llvm/ADT/GraphTraits.h"
 #include "llvm/ADT/STLExtras.h"
 
+#include <cstddef>
 #include <iterator>
+
+template<typename _Category, typename _Tp>
+struct iterator_base
+{
+  /// One of the @link iterator_tags tag types@endlink.
+  typedef _Category  iterator_category;
+  /// The type "pointed to" by the iterator.
+  typedef _Tp        value_type;
+  /// Distance between iterators is represented as this type.
+  typedef ptrdiff_t  difference_type;
+  /// This type represents a pointer-to-value_type.
+  typedef _Tp*  pointer;
+  /// This type represents a reference-to-value_type.
+  typedef _Tp& reference;
+};
 
 namespace llvm {
 
 template<typename NodeTy>
-class DSNodeIterator : public std::iterator<std::forward_iterator_tag, const DSNode, ptrdiff_t> {
+class DSNodeIterator : public iterator_base<std::forward_iterator_tag, const DSNode> {
   friend class DSNode;
 
   DSNode::const_edge_iterator NH;
