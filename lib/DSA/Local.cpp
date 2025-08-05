@@ -12,11 +12,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <llvm/IR/InstrTypes.h>
 #define DEBUG_TYPE "dsa-local"
 
 #include "dsa/DataStructure.h"
 #include "dsa/DSGraph.h"
+#include "dsa/AddressTakenAnalysis.h"
 
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/DenseSet.h"
@@ -30,7 +30,9 @@
 #include "llvm/IR/Use.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/FormattedStream.h"
+#include <llvm/IR/GlobalVariable.h>
+#include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/PassManager.h>
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/Support/Timer.h"
@@ -52,9 +54,6 @@ STATISTIC(NumIntrinsicCall, "Number of intrinsics called");
 STATISTIC(NumBoringIntToPtr, "Number of inttoptr used only in cmp");
 //STATISTIC(NumSimpleIntToPtr, "Number of inttoptr from ptrtoint");
 STATISTIC(NumIgnoredInst,       "Number of instructions ignored");
-
-RegisterPass<LocalDataStructures>
-X("dsa-local", "Local Data Structure Analysis");
 
 cl::opt<std::string> hasMagicSections("dsa-magic-sections",
         cl::desc("File with section to global mapping")); //, cl::ReallyHidden);
@@ -1295,38 +1294,33 @@ void handleMagicSections(DSGraph* GlobalsGraph, Module& M) {
   }
 }
 
-char LocalDataStructures::ID;
-// Publicly exposed interface to pass...
-char &llvm::LocalDataStructuresID = LocalDataStructures::ID;
 
-
-bool LocalDataStructures::runOnModule(Module &M) {
+LocalDataStructures::Result LocalDataStructures::run(Module &M, ModuleAnalysisManager& MAM) {
   init(&M.getDataLayout ());
-  addrAnalysis = &getAnalysis<AddressTakenAnalysis>();
+  addrAnalysis = MAM.getResult<AddressTakenAnalysis>(M);
 
   // First step, build the globals graph.
   {
     GraphBuilder GGB(*GlobalsGraph);
 
     // Add initializers for all of the globals to the globals graph.
-    for (Module::global_iterator I = M.global_begin(), E = M.global_end();
-         I != E; ++I)
-      if (!(I->hasSection() && I->getSection().compare("llvm.metadata") == 0)) {
-        if (I->isDeclaration())
-          GGB.mergeExternalGlobal(&*I);
+    for (GlobalVariable& GV : M.globals())
+      if (!(GV.hasSection() && GV.getSection().compare("llvm.metadata") == 0)) {
+        if (GV.isDeclaration())
+          GGB.mergeExternalGlobal(&GV);
         else
-          GGB.mergeInGlobalInitializer(&*I);
+          GGB.mergeInGlobalInitializer(&GV);
       }
     // Add Functions to the globals graph.
-    for (Module::iterator FI = M.begin(), FE = M.end(); FI != FE; ++FI){
-      if(addrAnalysis->hasAddressTaken(&*FI)) {
-        GGB.mergeFunction(&*FI);
+    for (Function& F : M){
+      if(addrAnalysis.count(&F)) {
+        GGB.mergeFunction(&F);
       }
     }
   }
 
   if (hasMagicSections.size())
-    handleMagicSections(GlobalsGraph, M);
+    handleMagicSections(getGlobalsGraph(), M);
 
   // Next step, iterate through the nodes in the globals graph, unioning
   // together the globals into equivalence classes.
@@ -1339,14 +1333,14 @@ bool LocalDataStructures::runOnModule(Module &M) {
   GlobalsGraph->maskIncompleteMarkers();
 
   // Calculate all of the graphs...
-  for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I)
-    if (!I->isDeclaration()) {
-      DSGraph* G = new DSGraph(GlobalECs, getDataLayout(), *TypeSS, GlobalsGraph);
-      GraphBuilder GGB(*I, *G, *this);
+  for (Function& F : M)
+    if (!F.isDeclaration()) {
+      DSGraph* G = new DSGraph(GlobalECs, getDataLayout(), *TypeSS, getGlobalsGraph());
+      GraphBuilder GGB(F, *G, *this);
       G->getAuxFunctionCalls() = G->getFunctionCalls();
-      setDSGraph(*I, G);
+      setDSGraph(F, G);
       propagateUnknownFlag(G);
-      callgraph.insureEntry(&*I);
+      callgraph.insureEntry(&F);
       G->buildCallGraph(callgraph, GlobalFunctionList, true);
       G->maskIncompleteMarkers();
       G->markIncompleteNodes(DSGraph::MarkFormalArgs
@@ -1369,10 +1363,10 @@ bool LocalDataStructures::runOnModule(Module &M) {
   // program.
   formGlobalECs();
 
-  propagateUnknownFlag(GlobalsGraph);
-  for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I)
-    if (!I->isDeclaration()) {
-      DSGraph *Graph = getOrCreateGraph(&*I);
+  propagateUnknownFlag(getGlobalsGraph());
+  for (Function& F : M)
+    if (!F.isDeclaration()) {
+      DSGraph *Graph = getOrCreateGraph(&F);
       Graph->maskIncompleteMarkers();
       cloneGlobalsInto(Graph, DSGraph::DontCloneCallNodes |
                        DSGraph::DontCloneAuxCallNodes);
@@ -1380,6 +1374,6 @@ bool LocalDataStructures::runOnModule(Module &M) {
                                  |DSGraph::IgnoreGlobals);
     }
 
-  return false;
+  return {this};
 }
 

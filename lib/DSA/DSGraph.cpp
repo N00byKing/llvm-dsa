@@ -1096,7 +1096,7 @@ void DSGraph::removeDeadNodes(unsigned Flags) {
   // This code merges information learned about the globals in 'this' graph
   // back into the globals graph, before it deletes any such global nodes, 
   // (with some new information possibly) from 'this' current function graph.
-  ReachabilityCloner GGCloner(GlobalsGraph, this, DSGraph::StripAllocaBit |
+  ReachabilityCloner GGCloner(getGlobalsGraph(), this, DSGraph::StripAllocaBit |
                               DSGraph::StripIncompleteBit);
 
   // Mark all nodes reachable by (non-global) scalar nodes as alive...
@@ -1475,7 +1475,7 @@ void DSGraph::computeCalleeCallerMapping(DSCallSite CS, const Function &Callee,
 /// nodes reachable from them from the globals graph into the current graph.
 ///
 void DSGraph::updateFromGlobalGraph() {
-  ReachabilityCloner RC(this, GlobalsGraph, 0);
+  ReachabilityCloner RC(this, getGlobalsGraph(), 0);
 
   // Clone the non-up-to-date global nodes into this graph.
   for (DSScalarMap::global_iterator I = getScalarMap().global_begin(),

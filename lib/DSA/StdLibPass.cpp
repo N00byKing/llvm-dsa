@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "dsa-stdlib"
+#include <llvm/IR/PassManager.h>
 #include "llvm/ADT/Statistic.h"
 #include "dsa/DataStructure.h"
 #include "dsa/AllocatorIdentification.h"
@@ -19,26 +20,15 @@
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Timer.h"
-#include <iostream>
 #include "llvm/IR/Module.h"
 
 using namespace llvm;
 
-static RegisterPass<StdLibDataStructures>
-X("dsa-stdlib", "Standard Library Local Data Structure Analysis");
-
 STATISTIC(NumNodesFoldedInStdLib,    "Number of nodes folded in std lib");
-
-char StdLibDataStructures::ID;
-
-// Publicly exposed interface to pass...
-char &llvm::StdLibDataStructuresID = StdLibDataStructures::ID;
 
 #define numOps 10
 namespace {
@@ -539,29 +529,29 @@ StdLibDataStructures::processRuntimeCheck (Module & M,
   return;
 }
 
-bool
-StdLibDataStructures::runOnModule (Module &M) {
+StdLibDataStructures::Result StdLibDataStructures::run(Module &M, ModuleAnalysisManager& MAM) {
   //
   // Get the results from the local pass.
   //
-  init (&getAnalysis<LocalDataStructures>(), true, true, false, false);
-  AllocWrappersAnalysis = &getAnalysis<AllocIdentify>();
+  auto x = MAM.getResult<LocalDataStructures>(M).res;
+  init (x, false, true, false, false);
+  AllocWrappersAnalysis = MAM.getResult<AllocIdentify>(M);
 
   //
   // Fetch the DSGraphs for all defined functions within the module.
   //
-  for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) 
-    if (!I->isDeclaration())
-      getOrCreateGraph(&*I);
+  for (Function& F : M)
+    if (!F.isDeclaration())
+      getOrCreateGraph(&F);
 
   //
   // Erase direct calls to functions that don't return a pointer and are marked
   // with the readnone annotation.
   //
-  for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) 
-    if (I->isDeclaration() && I->doesNotAccessMemory() &&
-        !isa<PointerType>(I->getReturnType()))
-      eraseCallsTo(&*I);
+  for (Function& F : M)
+    if (F.isDeclaration() && F.doesNotAccessMemory() &&
+        !isa<PointerType>(F.getReturnType()))
+      eraseCallsTo(&F);
 
   //
   // Erase direct calls to external functions that are not varargs, do not
@@ -593,8 +583,8 @@ StdLibDataStructures::runOnModule (Module &M) {
           processFunction(x, F);
         }
 
-    std::set<std::string>::iterator ai = AllocWrappersAnalysis->alloc_begin();
-    std::set<std::string>::iterator ae = AllocWrappersAnalysis->alloc_end();
+    std::set<std::string>::iterator ai = AllocWrappersAnalysis.alloc_begin();
+    std::set<std::string>::iterator ae = AllocWrappersAnalysis.alloc_end();
     int x;
     for (x = 0; recFuncs[x].name; ++x) {
       if(recFuncs[x].name == std::string("malloc"))
@@ -606,8 +596,8 @@ StdLibDataStructures::runOnModule (Module &M) {
         processFunction(x, F);
     }
 
-    ai = AllocWrappersAnalysis->dealloc_begin();
-    ae = AllocWrappersAnalysis->dealloc_end();
+    ai = AllocWrappersAnalysis.dealloc_begin();
+    ae = AllocWrappersAnalysis.dealloc_end();
     for (x = 0; recFuncs[x].name; ++x) {
       if(recFuncs[x].name == std::string("free"))
         break;
@@ -668,7 +658,7 @@ StdLibDataStructures::runOnModule (Module &M) {
                                  |DSGraph::IgnoreGlobals);
     }
 
-  return false;
+  return {this};
 }
 
 

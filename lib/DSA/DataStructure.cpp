@@ -10,6 +10,7 @@
 // This file implements the core data structure functionality.
 //
 //===----------------------------------------------------------------------===//
+
 #define DEBUG_TYPE "ds"
 #include "dsa/DSGraphTraits.h"
 #include "dsa/DataStructure.h"
@@ -1070,7 +1071,7 @@ void ReachabilityCloner::mergeCallSite(DSCallSite &DestCS,
     // If a call site passes more params, ignore the extra params.
     // If the called function is varargs, merge the extra params, with
     // the varargs node.
-    if(DestCS.getVAVal() != NULL) {
+    if(!DestCS.getVAVal().isNull()) {
       merge(DestCS.getVAVal(), SrcCS.getPtrArg(a));
     }
   }
@@ -1478,7 +1479,7 @@ void DataStructures::cloneIntoGlobals(DSGraph* Graph, unsigned cloneFlags) {
   // When this graph is finalized, clone the globals in the graph into the
   // globals graph to make sure it has everything, from all graphs.
   DSScalarMap &MainSM = Graph->getScalarMap();
-  ReachabilityCloner RC(GlobalsGraph, Graph, cloneFlags);
+  ReachabilityCloner RC(getGlobalsGraph(), Graph, cloneFlags);
 
   // Clone everything reachable from globals in the function graph into the
   // globals graph.
@@ -1537,9 +1538,10 @@ void DataStructures::releaseMemory() {
   for (DSInfoTy::iterator I = DSInfo.begin(), E = DSInfo.end(); I != E; ++I) {
     I->second->getReturnNodes().clear();
     toDelete.insert(I->second);
+    I->second = 0;
   }
-  for (std::set<DSGraph*>::iterator I = toDelete.begin(), E = toDelete.end(); I != E; ++I)
-    delete *I;
+  for (DSGraph* G : toDelete)
+    delete G; 
 
   // Empty map so next time memory is released, data structures are not
   // re-deleted.

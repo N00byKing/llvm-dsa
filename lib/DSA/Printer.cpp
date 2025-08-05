@@ -34,8 +34,6 @@ namespace {
   cl::list<std::string> OnlyPrint("dsa-only-print", cl::ReallyHidden);
   cl::opt<bool> DontPrintGraphs("dont-print-ds", cl::ReallyHidden);
   cl::opt<bool> LimitPrint("dsa-limit-print", cl::Hidden);
-  STATISTIC (MaxGraphSize   , "Maximum graph size");
-  STATISTIC (NumFoldedNodes , "Number of folded nodes (in final graph)");
 }
 
 void DSNode::dump() const { print(errs(), 0); }
@@ -373,15 +371,8 @@ static void printCollection(const Collection &C, llvm::raw_ostream &O,
       }
 
       if (!IsDuplicateGraph) {
-        unsigned GraphSize = Gr->getGraphSize();
-        if (MaxGraphSize < GraphSize) MaxGraphSize = GraphSize;
-
         TotalNumNodes += Gr->getGraphSize();
         TotalCallNodes += NumCalls;
-        for (DSGraph::node_iterator NI = Gr->node_begin(), E = Gr->node_end();
-             NI != E; ++NI)
-          if (NI->isNodeCompletelyFolded())
-            ++NumFoldedNodes;
       }
     }
 
@@ -404,12 +395,4 @@ void DataStructures::dumpCallGraph() const {
       errs() << (*cbi)->getName() << " ";
     errs() << "]\n";
   }
-}
-
-// print - Print out the analysis results...
-void DataStructures::print(llvm::raw_ostream &O, const Module *M) const {
-  if (handleTest(O, M)) return;
-
-  printCollection(*this, O, M, printname);
-  //dumpCallGraph();
 }

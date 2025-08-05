@@ -1,48 +1,38 @@
 #ifndef __STEENSGAARD_HH_
 #define __STEENSGAARD_HH_
+#include "dsa/DSGraph.h"
 #include "dsa/DataStructure.h"
+#include <llvm/IR/Analysis.h>
+#include <llvm/IR/PassManager.h>
+#include <llvm/Support/raw_ostream.h>
+#include <memory>
 
 namespace llvm
 {
   /// SteensgaardsDataStructures - Analysis that computes a context-insensitive
   /// data structure graphs for the whole program.
   ///
-  class SteensgaardDataStructures : public DataStructures {
-    DSGraph * ResultGraph;
-    DataStructures * DS;
+  class SteensgaardDataStructures : public DataStructures, public AnalysisInfoMixin<SteensgaardDataStructures> {
+    std::shared_ptr<DSGraph> ResultGraph;
+    DataStructures* DS;
     void ResolveFunctionCall (const Function *F, const DSCallSite &Call,
                               DSNodeHandle &RetVal);
     bool runOnModuleInternal(Module &M);
 
   public:
-    static char ID;
-    SteensgaardDataStructures() : 
-      DataStructures(ID, "steensgaard."),
-      ResultGraph(NULL) {}
-    virtual ~SteensgaardDataStructures() {}
-    virtual bool runOnModule(Module &M);
-    virtual void releaseMemory();
-
-    virtual void getAnalysisUsage(AnalysisUsage &AU) const 
-    {
-      AU.addRequired<StdLibDataStructures>();
-      AU.setPreservesAll();
-    }
+    static inline AnalysisKey Key;
+    using Result = std::shared_ptr<DSGraph>;
+    std::shared_ptr<DSGraph> run(Module &M, ModuleAnalysisManager& MAM);
   
     /// getDSGraph - Return the data structure graph for the specified function.
     ///
-    virtual DSGraph *getDSGraph(const Function& F) const 
+    DSGraph* getOrCreateGraph(const Function *F) const {return ResultGraph.get();}
+    DSGraph *getDSGraph(const Function& F) const override
     {
-      return F.isDeclaration () ? NULL : getResultGraph();
+      return F.isDeclaration () ? NULL : getOrCreateGraph(&F);
     }
   
-    virtual bool hasDSGraph(const Function& F) const {return !F.isDeclaration ();}
-    virtual DSGraph* getOrCreateGraph (const Function *F) {return getResultGraph ();}
-    
-
-    /// getDSGraph - Return the data structure graph for the whole program.
-    ///
-    DSGraph *getResultGraph() const {return ResultGraph;}
+    bool hasDSGraph(const Function& F) const override {return !F.isDeclaration ();}
 
     void print(llvm::raw_ostream &O, const Module *M) const;
   };

@@ -6,9 +6,7 @@ add_library (DSA STATIC
   DataStructure.cpp
   Printer.cpp
   DSCallGraph.cpp
-  TypeSafety.cpp
   DSGraph.cpp
-  EntryPointAnalysis.cpp
   Local.cpp
   Steensgaard.cpp
 )

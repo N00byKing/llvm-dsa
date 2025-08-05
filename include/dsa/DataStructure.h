@@ -20,13 +20,14 @@
 #include "dsa/AddressTakenAnalysis.h"
 #include "dsa/AllocatorIdentification.h"
 
-#include "llvm/Pass.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/ADT/EquivalenceClasses.h"
-#include "llvm/ADT/DenseSet.h"
 
+#include <llvm/IR/Analysis.h>
+#include <llvm/IR/PassManager.h>
 #include <map>
+#include <set>
 
 namespace llvm {
 
@@ -38,10 +39,8 @@ class DSCallSite;
 class DSNode;
 class DSNodeHandle;
 
-FunctionPass *createDataStructureStatsPass();
-FunctionPass *createDataStructureGraphCheckerPass();
+class DataStructures {
 
-class DataStructures : public ModulePass {
   typedef std::map<const Function*, DSGraph*> DSInfoTy;
 
   /// DataLayout, comes in handy
@@ -98,16 +97,12 @@ protected:
   
   void formGlobalFunctionList();
 
-  DataStructures(char & id, const char* name) 
-    : ModulePass(id), TD(0), GraphSource(0), printname(name), GlobalsGraph(0) {  
-    // For now, the graphs are owned by this pass
-    DSGraphsStolen = false;
-  }
+  DataStructures() : TD(0), GraphSource(0), DSGraphsStolen(false), GlobalsGraph(0) {}
+  virtual ~DataStructures() {}
 
 public:
   /// print - Print out the analysis results...
   ///
-  void print(llvm::raw_ostream &O, const Module *M) const override;
   void dumpCallGraph() const;
 
   /// handleTest - Handles various user-specified testing options.
@@ -115,7 +110,7 @@ public:
   ///
   bool handleTest(llvm::raw_ostream &O, const Module *M) const;
 
-  virtual void releaseMemory() override;
+  virtual void releaseMemory();
 
   virtual bool hasDSGraph(const Function &F) const {
     return DSInfo.find(&F) != DSInfo.end();
@@ -124,7 +119,7 @@ public:
   /// getDSGraph - Return the data structure graph for the specified function.
   ///
   virtual DSGraph *getDSGraph(const Function &F) const {
-    std::map<const Function*, DSGraph*>::const_iterator I = DSInfo.find(&F);
+    DSInfoTy::const_iterator I = DSInfo.find(&F);
     assert(I != DSInfo.end() && "Function not in module!");
     return I->second;
   }
@@ -151,255 +146,35 @@ public:
   void copyValue(Value *From, Value *To);
 };
 
-// BasicDataStructures - The analysis is a dummy one -- all pointers can points
-// to all possible locations.
-//
-class BasicDataStructures : public DataStructures {
-public:
-  static char ID;
-  BasicDataStructures() : DataStructures(ID, "basic.") {}
-  ~BasicDataStructures() { releaseMemory(); }
-
-  virtual bool runOnModule(Module &M) override;
-
-  /// getAnalysisUsage - This obviously provides a data structure graph.
-  ///
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.setPreservesAll();
-  }
-};
-
 // LocalDataStructures - The analysis that computes the local data structure
 // graphs for all of the functions in the program.
 //
 // FIXME: This should be a Function pass that can be USED by a Pass, and would
 // be automatically preserved.  Until we can do that, this is a Pass.
 //
-class LocalDataStructures : public DataStructures {
-  AddressTakenAnalysis* addrAnalysis;
+class LocalDataStructures : public DataStructures, public AnalysisInfoMixin<LocalDataStructures> {
+  std::set<Function*> addrAnalysis;
 public:
-  static char ID;
-  LocalDataStructures() : DataStructures(ID, "local.") {}
   ~LocalDataStructures() { releaseMemory(); }
+  static inline AnalysisKey Key;
 
-  virtual bool runOnModule(Module &M) override;
-
-  /// getAnalysisUsage - This obviously provides a data structure graph.
-  ///
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<AddressTakenAnalysis>();
-    AU.setPreservesAll();
-  }
+  struct Result { LocalDataStructures* res; };
+  Result run(Module &M, ModuleAnalysisManager& MAM);
 };
-
-extern char &LocalDataStructuresID;
 
 // StdLibDataStructures - This analysis recognizes common standard c library
 // functions and generates graphs for them.
-class StdLibDataStructures : public DataStructures {
+class StdLibDataStructures : public DataStructures, public AnalysisInfoMixin<StdLibDataStructures> {
   void eraseCallsTo(Function* F);
   void processRuntimeCheck (Module & M, std::string name, unsigned arg);
   void processFunction(int x, Function *F);
-  AllocIdentify *AllocWrappersAnalysis;
+  AllocIdentify::AllocIdentResult AllocWrappersAnalysis;
 public:
-  static char ID;
-  StdLibDataStructures() : DataStructures(ID, "stdlib.") {}
+  static inline AnalysisKey Key;
   ~StdLibDataStructures() { releaseMemory(); }
 
-  virtual bool runOnModule(Module &M) override;
-
-  /// getAnalysisUsage - This obviously provides a data structure graph.
-  ///
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<LocalDataStructures>();
-    AU.addRequired<AllocIdentify>();
-    AU.setPreservesAll();
-  }
-};
-
-extern char &StdLibDataStructuresID;
-
-/// BUDataStructures - The analysis that computes the interprocedurally closed
-/// data structure graphs for all of the functions in the program.  This pass
-/// only performs a "Bottom Up" propagation (hence the name).
-///
-class BUDataStructures : public DataStructures {
-protected:
-
-  const char* debugname;
-
-
-  // filterCallees -- Whether or not we filter out illegal callees
-  // from the CallGraph.  This is useful while doing original BU,
-  // but might be undesirable in other passes such as CBU/EQBU.
-  bool filterCallees;
-public:
-  static char ID;
-  //Child constructor (CBU)
-  BUDataStructures(char & CID, const char* name, const char* printname,
-      bool filter)
-    : DataStructures(CID, printname), debugname(name), filterCallees(filter) {}
-  //main constructor
-  BUDataStructures()
-    : DataStructures(ID, "bu."), debugname("dsa-bu"),
-    filterCallees(true) {}
-  ~BUDataStructures() { releaseMemory(); }
-
-  virtual bool runOnModule(Module &M) override ;
-
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<StdLibDataStructures>();
-    AU.setPreservesAll();
-  }
-
-protected:
-  bool runOnModuleInternal(Module &M);
-
-private:
-  // Private typedefs
-  typedef std::map<const Function*, unsigned> TarjanMap;
-  typedef std::vector<const Function*>        TarjanStack;
-  typedef svset<const Function*>              FuncSet;
-
-  void postOrderInline (Module & M);
-  unsigned calculateGraphs (const Function *F,
-                            TarjanStack & Stack,
-                            unsigned & NextID,
-                            TarjanMap & ValMap);
-
-  void calculateGraph(DSGraph* G);
-
-  void CloneAuxIntoGlobal(DSGraph* G);
-
-  void getAllCallees(const DSCallSite &CS, FuncSet &Callees);
-  void getAllAuxCallees (DSGraph* G, FuncSet &Callees);
-  void applyCallsiteFilter(const DSCallSite &DCS, FuncSet &Callees);
-};
-
-/// CompleteBUDataStructures - This is the exact same as the bottom-up graphs,
-/// but we use take a completed call graph and inline all indirect callees into
-/// their callers graphs, making the result more useful for things like pool
-/// allocation.
-///
-class CompleteBUDataStructures : public  BUDataStructures {
-protected:
-  void buildIndirectFunctionSets (void);
-public:
-  static char ID;
-  CompleteBUDataStructures(char & CID = ID, 
-                           const char* name = "dsa-cbu", 
-                           const char* printname = "cbu.")
-    : BUDataStructures(CID, name, printname, false) {}
-  ~CompleteBUDataStructures() { releaseMemory(); }
-
-  virtual bool runOnModule(Module &M) override ;
-
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<BUDataStructures>();
-    AU.setPreservesAll();
-  }
-
-};
-
-/// EquivBUDataStructures - This is the same as the complete bottom-up graphs, but
-/// with functions partitioned into equivalence classes and a single merged
-/// DS graph for all functions in an equivalence class.  After this merging,
-/// graphs are inlined bottom-up on the SCCs of the final (CBU) call graph.
-///
-class EquivBUDataStructures : public CompleteBUDataStructures {
-  void mergeGraphsByGlobalECs();
-  void verifyMerging();
-
-public:
-  static char ID;
-  EquivBUDataStructures()
-    : CompleteBUDataStructures(ID, "dsa-eq", "eq.") {}
-  ~EquivBUDataStructures() { releaseMemory(); }
-
-  virtual bool runOnModule(Module &M) override ;
-
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<CompleteBUDataStructures>();
-    AU.setPreservesAll();
-  }
-
-};
-
-/// TDDataStructures - Analysis that computes new data structure graphs
-/// for each function using the closed graphs for the callers computed
-/// by the bottom-up pass.
-///
-class TDDataStructures : public DataStructures {
-  svset<const Function*> ExternallyCallable;
-
-  /// CallerCallEdges - For a particular graph, we keep a list of these records
-  /// which indicates which graphs call this function and from where.
-  struct CallerCallEdge {
-    DSGraph *CallerGraph;        // The graph of the caller function.
-    const DSCallSite *CS;        // The actual call site.
-    const Function *CalledFunction;    // The actual function being called.
-
-    CallerCallEdge(DSGraph *G, const DSCallSite *cs, const Function *CF)
-      : CallerGraph(G), CS(cs), CalledFunction(CF) {}
-
-    bool operator<(const CallerCallEdge &RHS) const {
-      return CallerGraph < RHS.CallerGraph ||
-            (CallerGraph == RHS.CallerGraph && CS < RHS.CS);
-    }
-  };
-
-  std::map<DSGraph*, std::vector<CallerCallEdge> > CallerEdges;
-
-
-  // IndCallMap - We memoize the results of indirect call inlining operations
-  // that have multiple targets here to avoid N*M inlining.  The key to the map
-  // is a sorted set of callee functions, the value is the DSGraph that holds
-  // all of the caller graphs merged together, and the DSCallSite to merge with
-  // the arguments for each function.
-  std::map<std::vector<const Function*>, DSGraph*> IndCallMap;
-
-  bool useEQBU;
-
-public:
-  static char ID;
-  TDDataStructures(char & CID = ID, const char* printname = "td.", bool useEQ = false)
-    : DataStructures(CID, printname), useEQBU(useEQ) {}
-  ~TDDataStructures();
-
-  virtual bool runOnModule(Module &M) override ;
-
-  /// getAnalysisUsage - This obviously provides a data structure graph.
-  ///
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
-    if (useEQBU) {
-      AU.addRequired<EquivBUDataStructures>();
-    } else {
-      AU.addRequired<BUDataStructures>();
-      AU.addPreserved<BUDataStructures>();
-    }
-    AU.setPreservesAll();
-  }
-
-private:
-  void markReachableFunctionsExternallyAccessible(DSNode *N,
-                                                  DenseSet<DSNode*> &Visited);
-
-  void InlineCallersIntoGraph(DSGraph* G);
-  void ComputePostOrder(const Function &F, DenseSet<DSGraph*> &Visited,
-                        std::vector<DSGraph*> &PostOrder);
-};
-
-/// EQTDDataStructures - Analysis that computes new data structure graphs
-/// for each function using the closed graphs for the callers computed
-/// by the EQ bottom-up pass.
-///
-class EQTDDataStructures : public TDDataStructures {
-public:
-  static char ID;
-  EQTDDataStructures()
-    :TDDataStructures(ID, "eqtd.", true)
-  {}
-  ~EQTDDataStructures();
+  struct Result { StdLibDataStructures* res; };
+  Result run(Module &M, ModuleAnalysisManager& MAM);
 };
 
 } // End llvm namespace

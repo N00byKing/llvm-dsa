@@ -20,16 +20,9 @@
 
 #include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
+#include <memory>
 
 using namespace llvm;
-
-void SteensgaardDataStructures::releaseMemory() 
-{
-  delete ResultGraph; 
-  ResultGraph = 0;
-  DataStructures::releaseMemory();
-}
-
 
 void SteensgaardDataStructures::print(llvm::raw_ostream &O, const Module *M) const {
   assert(ResultGraph && "Result graph has not yet been computed!");
@@ -39,25 +32,26 @@ void SteensgaardDataStructures::print(llvm::raw_ostream &O, const Module *M) con
 /// run - Build up the result graph, representing the pointer graph for the
 /// program.
 ///
-bool SteensgaardDataStructures::runOnModule(Module &M) 
+SteensgaardDataStructures::Result SteensgaardDataStructures::run(Module &M, ModuleAnalysisManager& MAM)
 {
-  DS = &getAnalysis<StdLibDataStructures>();
+  DS = MAM.getResult<StdLibDataStructures>(M).res;
   init (&M.getDataLayout ());
-  return runOnModuleInternal(M);
+  runOnModuleInternal(M);
+  return ResultGraph;
 }
 
 bool SteensgaardDataStructures::runOnModuleInternal (Module &M) 
 {
   assert(ResultGraph == 0 && "Result graph already allocated!");
-  
+
   // Get a copy for the globals graph.
   DSGraph * GG = DS->getGlobalsGraph();
   GlobalsGraph = new DSGraph(GG, GG->getGlobalECs(), *TypeSS, 0);
 
   // Create a new, empty, graph...
-  ResultGraph = new DSGraph(GG->getGlobalECs(), getDataLayout(), 
-                            *TypeSS, GlobalsGraph);
-  
+  ResultGraph = std::make_shared<DSGraph>(GG->getGlobalECs(), getDataLayout(), 
+                            *TypeSS, getGlobalsGraph());
+
   // Loop over the rest of the module, merging graphs for non-external functions
   // into this graph.
   //
@@ -140,7 +134,7 @@ bool SteensgaardDataStructures::runOnModuleInternal (Module &M)
   formGlobalECs();
 
   // Clone the global nodes into this graph.
-  ReachabilityCloner RC(ResultGraph, GlobalsGraph,
+  ReachabilityCloner RC(ResultGraph.get(), getGlobalsGraph(),
                         DSGraph::DontCloneCallNodes |
                         DSGraph::DontCloneAuxCallNodes);
   for (DSScalarMap::global_iterator I = GlobalsGraph->getScalarMap().global_begin(),
@@ -180,13 +174,3 @@ SteensgaardDataStructures::ResolveFunctionCall(const Function *F,
       I->second.mergeWith (Call.getPtrArg(PtrArgIdx++));
   }
 }
-
-char SteensgaardDataStructures::ID = 0;
-
-// Publicly exposed interface to pass...
-char &llvm::SteensgaardDataStructuresID = SteensgaardDataStructures::ID;
-
-// Register the pass...
-static RegisterPass<SteensgaardDataStructures> X
-("dsa-steens",
- "Context-insensitive Data Structure Analysis");
