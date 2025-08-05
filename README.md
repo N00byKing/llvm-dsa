@@ -1,6 +1,6 @@
 # llvm-dsa #
 
-DSA fork for SeaHorn. 
-Based on the DSA for in [SMACK](https://github.com/smackers/smack).
-Originally from [PoolAlloc](https://llvm.org/svn/llvm-project/poolalloc/).
-LLVM version is 5.0
+DSA fork for CoVer. 
+Based on the DSA for [SeaHorn](https://github.com/seahorn/llvm-dsa).
+Originally from [PoolAlloc](https://github.com/llvm-mirror/poolalloc).
+LLVM version is 20
