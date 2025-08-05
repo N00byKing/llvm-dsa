@@ -15,16 +15,14 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Pass.h"
+#include <llvm/IR/PassManager.h>
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Debug.h"
 
 #include <set>
 #include <map>
-#include <vector>
 #include <string>
 
 #include "dsa/AllocatorIdentification.h"
@@ -42,7 +40,7 @@ bool AllocIdentify::flowsFrom(Value *Dest,Value *Src) {
   }
   if(PHINode *PN = dyn_cast<PHINode>(Dest)) {
     Function *F = PN->getParent()->getParent();
-    LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>(*F).getLoopInfo();
+    LoopInfo &LI = MAM->getResult<FunctionAnalysisManagerModuleProxy>(*F->getParent()).getManager().getResult<LoopAnalysis>(*F);
     // If this is a loop phi, ignore.
     if(LI.isLoopHeader(PN->getParent()))
       return false;
@@ -88,10 +86,8 @@ bool isNotStored(Value *V) {
   return true;
 }
 
-AllocIdentify::AllocIdentify() : ModulePass(ID) {}
-AllocIdentify::~AllocIdentify() {}
-
-bool AllocIdentify::runOnModule(Module& M) {
+AllocIdentify::Result AllocIdentify::run(Module& M, ModuleAnalysisManager& _MAM) {
+  MAM = &_MAM;
 
   // C
   allocators.insert("malloc");
@@ -206,18 +202,5 @@ bool AllocIdentify::runOnModule(Module& M) {
       }
     }
   } while(changed);
-  return false;
+  return AllocIdentResult{allocators, deallocators};
 }
-void AllocIdentify::getAnalysisUsage(AnalysisUsage &AU) const {
-  AU.addRequired<LoopInfoWrapperPass>();
-  AU.setPreservesAll();
-}
-
-char AllocIdentify::ID = 0;
-
-// Publicly exposed interface to pass...
-char &llvm::AllocIdentifyID = AllocIdentify::ID;
-
-
-static RegisterPass<AllocIdentify>
-X("alloc-identify", "Identify allocator wrapper functions");

@@ -12,9 +12,9 @@
 #ifndef _ALLOCATORIDENTIFICATION_H
 #define	_ALLOCATORIDENTIFICATION_H
 
+#include <llvm/IR/PassManager.h>
 #include <set>
 #include <string>
-#include "llvm/Pass.h"
 #include "llvm/IR/Value.h"
 #include "llvm/ADT/StringRef.h"
 
@@ -23,36 +23,34 @@ namespace llvm {
   class Module;
   class Instruction;
 
-  class AllocIdentify : public llvm::ModulePass {
+  class AllocIdentify : public AnalysisInfoMixin<AllocIdentify> {
   protected:
     std::set<std::string> allocators;
     std::set<std::string> deallocators;
+    ModuleAnalysisManager* MAM;
     bool flowsFrom(Value *Dest,Value *Src);
 
   public:
-    std::set<std::string>::iterator alloc_begin() {
+    struct AllocIdentResult {
+      std::set<std::string> allocators;
+      std::set<std::string> deallocators;
+      std::set<std::string>::iterator alloc_begin() {
       return allocators.begin();
-    }
-    std::set<std::string>::iterator alloc_end() {
-      return allocators.end();
-    }
-    std::set<std::string>::iterator dealloc_begin() {
-      return deallocators.begin();
-    }
-    std::set<std::string>::iterator dealloc_end() {
-      return deallocators.end();
-    }
-    static char ID;
-    AllocIdentify();
-    virtual ~AllocIdentify();
-    bool runOnModule(llvm::Module&) override;
-    virtual void getAnalysisUsage(llvm::AnalysisUsage &Info) const override;
-    virtual StringRef getPassName() const override {
-      return "Allocator Identification Analysis (find malloc/free wrappers)";
-    }
+      }
+      std::set<std::string>::iterator alloc_end() {
+        return allocators.end();
+      }
+      std::set<std::string>::iterator dealloc_begin() {
+        return deallocators.begin();
+      }
+      std::set<std::string>::iterator dealloc_end() {
+        return deallocators.end();
+      }
+    };
+    using Result = AllocIdentResult;
+    static inline llvm::AnalysisKey Key;
+    Result run(llvm::Module& M, ModuleAnalysisManager& MAM);
   };
-
-extern char &AllocIdentifyID;  
 }
 
 #endif	/* _ALLOCATORIDENTIFICATION_H */
