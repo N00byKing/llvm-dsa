@@ -16,34 +16,28 @@
 #ifndef _ADDRESSTAKENANALYSIS_H
 #define	_ADDRESSTAKENANALYSIS_H
 
-#include "llvm/Pass.h"
-
+#include <llvm/IR/PassManager.h>
 #include <string>
 #include <set>
 
 namespace llvm {
+
 class Function;
 class Module;
 class Instruction;
 
-class AddressTakenAnalysis : public llvm::ModulePass {
+class AddressTakenAnalysis : public AnalysisInfoMixin<AddressTakenAnalysis> {
   std::set<Function*> addressTakenFunctions;
 public:
-  static char ID;
-  AddressTakenAnalysis() : ModulePass (ID) {}
-  virtual ~AddressTakenAnalysis();
+  static inline AnalysisKey Key;
 
-  bool runOnModule(llvm::Module&) override;
-
-  virtual void getAnalysisUsage(llvm::AnalysisUsage &Info) const override;
+  using Result = std::set<Function*>;
+  Result run(llvm::Module& M, ModuleAnalysisManager& MAM);
 
   bool hasAddressTaken(llvm::Function *);
 
 };
 
-extern char &AddressTakenAnalysisID;  
-
 }
 
 #endif	/* _ADDRESSTAKENANALYSIS_H */
-

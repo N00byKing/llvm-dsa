@@ -25,14 +25,12 @@
 #include "llvm/IR/InstrTypes.h"
 
 #include <fstream>
+#include <llvm/IR/PassManager.h>
 #include <set>
 
 #include "dsa/AddressTakenAnalysis.h"
 
 using namespace llvm;
-
-
-AddressTakenAnalysis::~AddressTakenAnalysis() {}
 
 static bool isAddressTaken(Value* V) {
   for (Value::const_use_iterator I = V->use_begin(), E = V->use_end(); I != E; ++I) {
@@ -67,25 +65,12 @@ static bool isAddressTaken(Value* V) {
   return false;
 }
 
-bool AddressTakenAnalysis::runOnModule(llvm::Module& M) {
+AddressTakenAnalysis::Result AddressTakenAnalysis::run(llvm::Module& M, ModuleAnalysisManager& MAM) {
   for (Module::iterator FI = M.begin(), FE = M.end(); FI != FE; ++FI){
     if(isAddressTaken(&*FI)) {
       addressTakenFunctions.insert(&*FI);
     }
   }
 
-  return false;
+  return addressTakenFunctions;
 }
-bool AddressTakenAnalysis::hasAddressTaken(llvm::Function *F){
-  return addressTakenFunctions.find(F) != addressTakenFunctions.end();
-}
-
-void AddressTakenAnalysis::getAnalysisUsage(llvm::AnalysisUsage &AU) const {
-  AU.setPreservesAll();
-}
-
-char AddressTakenAnalysis::ID;
-static RegisterPass<AddressTakenAnalysis> A("ata", "Identify Address Taken Functions");
-
-// Publicly exposed interface to pass...
-char &llvm::AddressTakenAnalysisID = AddressTakenAnalysis::ID;
