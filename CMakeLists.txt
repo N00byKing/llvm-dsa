@@ -1,69 +1,12 @@
-project(dsa-seahorn)
-cmake_minimum_required(VERSION 3.11)
+cmake_minimum_required(VERSION 3.15)
+project(dsa-cover)
 
-if (CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR )
-  message (FATAL_ERROR
-    "In-source builds are not allowed. Please clean your source tree and try again.")
-endif()
-
-# determine if this is top-level or embedded project
-if (PROJECT_NAME STREQUAL CMAKE_PROJECT_NAME)
-  set (TOP_LEVEL TRUE)
-else()
-  set (TOP_LEVEL FALSE)
-endif()
-
-# Add path for custom modules
-list (APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-
-# put static libraries first
-set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ${CMAKE_FIND_LIBRARY_SUFFIXES})
-
-## Boost
-if (TOP_LEVEL)
-  set (CUSTOM_BOOST_ROOT "" CACHE PATH "Path to custom boost installation.")
-  if (CUSTOM_BOOST_ROOT)
-    set (BOOST_ROOT ${CUSTOM_BOOST_ROOT})
-    set (Boost_NO_SYSTEM_PATHS "ON")
-  endif()
-
-  find_package(Boost)
-  if (Boost_FOUND)
-    include_directories (${Boost_INCLUDE_DIRS})
-  endif ()
-endif ()
-
-## llvm
-if (TOP_LEVEL)
-  find_package(LLVM)
-  
-  message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
-  message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
-
-  # We incorporate the CMake features provided by LLVM:
-  list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
-  include(AddLLVM)
-  include(HandleLLVMOptions)
-  set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
-  set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib)
-  
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${LLVM_CXXFLAGS}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LLVM_LDFLAGS}")
-  
-  set(LLVM_REQUIRES_RTTI TRUE)
-  set(LLVM_REQUIRES_EH TRUE)
-  
-  include_directories(${LLVM_INCLUDE_DIRS})
-  link_directories(${LLVM_LIBRARY_DIRS})
-  add_definitions(${LLVM_DEFINITIONS})
-endif ()
-
-# check for rt lib. Not needed on OSX.
-find_library(RT_LIB NAMES rt)
-if (NOT RT_LIB)
-  set(RT_LIB "")
-endif()
-mark_as_advanced(RT_LIB)
+find_package(LLVM REQUIRED CONFIG)
+list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
+include(AddLLVM)
+add_definitions(${LLVM_DEFINITIONS})
+include_directories(${LLVM_INCLUDE_DIRS})
+link_directories(${LLVM_LIBRARY_DIR})
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -74,12 +17,5 @@ install(DIRECTORY include/
   PATTERN "*.TXT"  
   PATTERN "CMakeFiles" EXCLUDE  
   PATTERN ".svn" EXCLUDE)
-
-add_definitions(-Wno-redeclared-class-member -Wno-sometimes-uninitialized)
-add_definitions(-Wno-covered-switch-default)
-
-if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
-  add_definitions( -Wno-unused-local-typedefs)
-endif ()
 
 add_subdirectory (lib/DSA)

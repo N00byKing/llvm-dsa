@@ -1,4 +1,4 @@
-add_library (DSA STATIC
+add_llvm_pass_plugin (DSA
   AddressTakenAnalysis.cpp
   DSTest.cpp
   StdLibPass.cpp
@@ -9,7 +9,8 @@ add_library (DSA STATIC
   DSGraph.cpp
   Local.cpp
   Steensgaard.cpp
+  Registrar.cpp
 )
 set_property(TARGET DSA PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-install(TARGETS DSA ARCHIVE DESTINATION lib)
+install(TARGETS DSA LIBRARY DESTINATION lib)
