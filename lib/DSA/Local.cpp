@@ -148,9 +148,8 @@ namespace {
     GraphBuilder(Function &f, std::shared_ptr<DSGraph> g, LocalDataStructures& DSi)
       : G(g), FB(&f), DS(&DSi), TD(g->getDataLayout()), VAArray(0) {
       // Create scalar nodes for all pointer arguments...
-      for (Function::arg_iterator I = f.arg_begin(), E = f.arg_end();
-           I != E; ++I) {
-        if (isa<PointerType>(I->getType())) {
+      for (Argument& Arg : f.args()) {
+        if (isa<PointerType>(Arg.getType())) {
           // WD: Why do we set the external marker so early in the analysis?
           // Functions we have definitions for, but are externally reachable have no external contexts
           // that we'd want to BU external information into (since those contexts are by definition
@@ -161,7 +160,7 @@ namespace {
           if (!f.hasInternalLinkage() || !f.hasPrivateLinkage())
             Node->setExternalMarker();
 #else
-          getValueDest(&*I).getNode();
+          getValueDest(&Arg).getNode();
 #endif
 
         }
@@ -1057,6 +1056,10 @@ void GraphBuilder::visitCallSite(CallBase* CS) {
 
   //Get the FunctionType for the called function
   const FunctionType *CalleeFuncType = DSCallSite::FunctionTypeOfCallSite(CS);
+  if (!CalleeFuncType) {
+    // No info, cant continue here
+    return;
+  }
   int NumFixedArgs = CalleeFuncType->getNumParams();
 
   // Sanity check--this really, really shouldn't happen
