@@ -22,7 +22,9 @@
 
 #include <list>
 #include <map>
+#include <memory>
 #include <set>
+#include <utility>
 
 namespace llvm {
 
@@ -191,7 +193,7 @@ private:
 //===----------------------------------------------------------------------===//
 /// DSGraph - The graph that represents a function.
 ///
-class DSGraph {
+class DSGraph : public std::enable_shared_from_this<DSGraph> {
 public:
   // Public data-type declarations...
   typedef DSScalarMap ScalarMapTy;
@@ -209,7 +211,7 @@ public:
   typedef std::multimap<DSNodeHandle, const DSNode*> InvNodeMapTy;
   typedef std::list<DSCallSite> FunctionListTy;
 private:
-  DSGraph *GlobalsGraph;   // Pointer to the common graph of global objects
+  std::shared_ptr<DSGraph> GlobalsGraph;   // Pointer to the common graph of global objects
 
   // This is use to differentiate between Local and the rest of the passes.
   // Local should use the FunctionCalls vector that has all the DSCallSites.
@@ -253,32 +255,33 @@ private:
 
   SuperSet<Type*>& TypeSS;
 
-  void operator=(const DSGraph &); // DO NOT IMPLEMENT
-  DSGraph(const DSGraph&);         // DO NOT IMPLEMENT
-public:
-  // Create a new, empty, DSGraph.
+  void operator=(const DSGraph &) = delete; // DO NOT IMPLEMENT
+  DSGraph(const DSGraph&) = delete;         // DO NOT IMPLEMENT
+
+  DSGraph( std::shared_ptr<DSGraph> DSG, EquivalenceClasses<const GlobalValue*> &ECs,
+          SuperSet<Type*>& tss);
   DSGraph(EquivalenceClasses<const GlobalValue*> &ECs, const DataLayout &td,
           SuperSet<Type*>& tss,
-          DSGraph *GG = 0) 
+          std::shared_ptr<DSGraph> GG = 0) 
     :GlobalsGraph(GG), UseAuxCalls(false), 
      ScalarMap(ECs), TD(td), TypeSS(tss)
   { }
 
-  // Copy ctor - If you want to capture the node mapping between the source and
-  // destination graph, you may optionally do this by specifying a map to record
-  // this into.
-  //
-  // Note that a copied graph does not retain the GlobalsGraph pointer of the
-  // source.  You need to set a new GlobalsGraph with the setGlobalsGraph
-  // method.
-  //
-  DSGraph( DSGraph* DSG, EquivalenceClasses<const GlobalValue*> &ECs,
-          SuperSet<Type*>& tss,
-          unsigned CloneFlags = 0);
+public:
   ~DSGraph();
 
-  DSGraph *getGlobalsGraph() const { return GlobalsGraph; }
-  void setGlobalsGraph(DSGraph *G) { GlobalsGraph = G; }
+  // Create a new  DSGraph
+  static std::shared_ptr<DSGraph> create(std::shared_ptr<DSGraph> DSG, EquivalenceClasses<const GlobalValue*> &ECs, SuperSet<Type*>& tss, unsigned CloneFlags = 0) {
+    std::shared_ptr<DSGraph> ret = std::move(std::shared_ptr<DSGraph>(new DSGraph(DSG, ECs, tss)));
+    ret->cloneInto(DSG, CloneFlags);
+    return std::move(ret);
+  }
+  static std::shared_ptr<DSGraph> create(EquivalenceClasses<const GlobalValue*> &ECs, const DataLayout &td, SuperSet<Type*>& tss, std::shared_ptr<DSGraph> GG = 0) {
+    return std::move(std::shared_ptr<DSGraph>(new DSGraph(ECs, td, tss, GG)));
+  }
+
+  std::shared_ptr<DSGraph> getGlobalsGraph() const { return GlobalsGraph; }
+  void setGlobalsGraph(std::shared_ptr<DSGraph> G) { GlobalsGraph = G; }
 
   /// getGlobalECs - Return the set of equivalence classes that the global
   /// variables in the program form.
@@ -568,13 +571,13 @@ public:
   /// this graph, then clearing the RHS graph.  Instead of performing this as
   /// two seperate operations, do it as a single, much faster, one.
   ///
-  void spliceFrom(DSGraph* RHS);
+  void spliceFrom(std::shared_ptr<DSGraph> const& RHS);
 
   /// cloneInto - Clone the specified DSGraph into the current graph.
   ///
   /// The CloneFlags member controls various aspects of the cloning process.
   ///
-  void cloneInto(DSGraph* G, unsigned CloneFlags = 0);
+  void cloneInto(std::shared_ptr<DSGraph> const& G, unsigned CloneFlags = 0);
 
   /// getFunctionArgumentsForCall - Given a function that is currently in this
   /// graph, return the DSNodeHandles that correspond to the pointer-compatible
@@ -583,21 +586,6 @@ public:
   /// pointer-compatible arguments.
   void getFunctionArgumentsForCall(const Function *F,
                                    std::vector<DSNodeHandle> &Args) const;
-
-  /// mergeInGraph - This graph merges in the minimal number of
-  /// nodes from G2 into 'this' graph, merging the bindings specified by the
-  /// call site (in this graph) with the bindings specified by the vector in G2.
-  /// If the StripAlloca's argument is 'StripAllocaBit' then Alloca markers are
-  /// removed from nodes.
-  ///
-  void mergeInGraph(const DSCallSite &CS, std::vector<DSNodeHandle> &Args,
-                    const DSGraph &G2, unsigned CloneFlags);
-
-  /// mergeInGraph - This method is the same as the above method, but the
-  /// argument bindings are provided by using the formal arguments of F.
-  ///
-  void mergeInGraph(const DSCallSite &CS, const Function &F, 
-                    const DSGraph &Graph, unsigned CloneFlags);
 
   /// getCallSiteForArguments - Get the arguments and return value bindings for
   /// the specified function in the current graph.
@@ -637,8 +625,8 @@ public:
 /// all of the nodes reachable from it are automatically brought over as well.
 ///
 class ReachabilityCloner {
-  DSGraph* Dest;
-  const DSGraph* Src;
+  std::shared_ptr<DSGraph> const& Dest;
+  std::shared_ptr<const DSGraph> const& Src;
 
   /// BitsToKeep - These bits are retained from the source node when the
   /// source nodes are merged into the destination graph.
@@ -655,7 +643,7 @@ class ReachabilityCloner {
   RCNodeMap NodeMap;
 
 public:
-  ReachabilityCloner(DSGraph* dest, const DSGraph* src, unsigned cloneFlags,
+  ReachabilityCloner(std::shared_ptr<DSGraph> const& dest, std::shared_ptr<const DSGraph> const& src, unsigned cloneFlags,
                      bool _createDest = true)
     : Dest(dest), Src(src), CloneFlags(cloneFlags), createDest(_createDest) {
     assert(Dest != Src && "Cannot clone from graph to same graph!");

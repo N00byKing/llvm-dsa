@@ -12,28 +12,23 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "ds"
-#include "dsa/DSGraphTraits.h"
 #include "dsa/DataStructure.h"
 #include "dsa/DSGraph.h"
 #include "dsa/DSSupport.h"
 #include "dsa/DSNode.h"
-#include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/ADT/DepthFirstIterator.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SCCIterator.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <iostream>
-#include <algorithm>
+#include <memory>
+
 using namespace llvm;
 
 #define COLLAPSE_ARRAYS_AGGRESSIVELY 0
@@ -811,7 +806,7 @@ DSNodeHandle ReachabilityCloner::getClonedNH(const DSNodeHandle &SrcNH) {
 
   if (!createDest) return DSNodeHandle(0,0);
 
-  DSNode *DN = new DSNode(*SN, Dest, true /* Null out all links */);
+  DSNode *DN = new DSNode(*SN, Dest.get(), true /* Null out all links */);
   DN->maskNodeTypes(BitsToKeep);
   NH = DN;
 
@@ -982,7 +977,7 @@ void ReachabilityCloner::merge(const DSNodeHandle &NH,
   } else {
     // We cannot handle this case without allocating a temporary node.  Fall
     // back on being simple.
-    DSNode *NewDN = new DSNode(*SN, Dest, true /* Null out all links */);
+    DSNode *NewDN = new DSNode(*SN, Dest.get(), true /* Null out all links */);
     NewDN->maskNodeTypes(BitsToKeep);
 
 #ifndef NDEBUG
@@ -1223,10 +1218,9 @@ void DataStructures::deleteValue(Value *V) {
   }
 
   if (Function *F = dyn_cast<Function>(V)) {
-    DSGraph *G = getDSGraph(*F);
+    std::shared_ptr<DSGraph> G = getDSGraph(*F);
     if (G->getReturnNodes().size() == 1) {
       // If this is function is part of its own SCC, just delete the graph for it
-      delete G;
       DSInfo.erase(F);
     } else {
       // SCC case
@@ -1263,11 +1257,11 @@ void DataStructures::copyValue(Value *From, Value *To) {
   if (Function *FromF = dyn_cast<Function>(From)) {
     Function *ToF = cast<Function>(To);
     assert(!DSInfo.count(ToF) && "New Function already exists!");
-    DSGraph *G = getDSGraph(*FromF);
+    std::shared_ptr<DSGraph> G = getDSGraph(*FromF);
     if (G->getReturnNodes().size() == 1) {
       // Copy a single function by duplicating its dsgraph
 
-      DSGraph *NG = new DSGraph(getDSGraph(*FromF), GlobalECs, *TypeSS);
+      std::shared_ptr<DSGraph >NG = DSGraph::create(getDSGraph(*FromF), GlobalECs, getTypeSS());
       DSInfo[ToF] = NG;
 
       // Change the Function* is the returnnodes map to the ToF.
@@ -1304,19 +1298,19 @@ void DataStructures::copyValue(Value *From, Value *To) {
   abort();
 }
 
-DSGraph* DataStructures::getOrCreateGraph(const Function* F) {
+std::shared_ptr<DSGraph> DataStructures::getOrCreateGraph(const Function* F) {
   assert(F && "No function");
-  DSGraph *&G = DSInfo[F];
+  std::shared_ptr<DSGraph>& G = DSInfo[F];
   if (!G) {
     assert (F->isDeclaration() || GraphSource->hasDSGraph(*F));
     //Clone or Steal the Source Graph
-    DSGraph* BaseGraph = GraphSource->getDSGraph(*F);
+    std::shared_ptr<DSGraph> BaseGraph = GraphSource->getDSGraph(*F);
     if (Clone) {
-      G = new DSGraph(BaseGraph, GlobalECs, *TypeSS);
+      G = DSGraph::create(BaseGraph, GlobalECs, *TypeSS);
       if (resetAuxCalls)
         G->getAuxFunctionCalls() = G->getFunctionCalls();
     } else {
-      G = new DSGraph(GlobalECs, GraphSource->getDataLayout(), *TypeSS);
+      G = DSGraph::create(GlobalECs, GraphSource->getDataLayout(), *TypeSS);
       G->spliceFrom(BaseGraph);
       if (resetAuxCalls)
         G->getAuxFunctionCalls() = G->getFunctionCalls();
@@ -1460,12 +1454,12 @@ void DataStructures::eliminateUsesOfECGlobals(DSGraph &G,
 }
 
 //For Entry Points
-void DataStructures::cloneGlobalsInto(DSGraph* Graph, unsigned cloneFlags) {
+void DataStructures::cloneGlobalsInto(std::shared_ptr<DSGraph> const& Graph, unsigned cloneFlags) {
   // If this graph contains main, copy the contents of the globals graph over.
   // Note that this is *required* for correctness.  If a callee contains a use
   // of a global, we have to make sure to link up nodes due to global-argument
   // bindings.
-  const DSGraph* GG = Graph->getGlobalsGraph();
+  std::shared_ptr<DSGraph> GG = Graph->getGlobalsGraph();
   ReachabilityCloner RC(Graph, GG, cloneFlags);
 
   // Clone the global nodes into this graph.
@@ -1475,7 +1469,7 @@ void DataStructures::cloneGlobalsInto(DSGraph* Graph, unsigned cloneFlags) {
 }
 
 //For all graphs
-void DataStructures::cloneIntoGlobals(DSGraph* Graph, unsigned cloneFlags) {
+void DataStructures::cloneIntoGlobals(std::shared_ptr<DSGraph> const& Graph, unsigned cloneFlags) {
   // When this graph is finalized, clone the globals in the graph into the
   // globals graph to make sure it has everything, from all graphs.
   DSScalarMap &MainSM = Graph->getScalarMap();
@@ -1500,7 +1494,7 @@ void DataStructures::init(DataStructures* D, bool clone, bool useAuxCalls,
   callgraph = D->callgraph;
   GlobalFunctionList = D->GlobalFunctionList;
   GlobalECs = D->getGlobalECs();
-  GlobalsGraph = new DSGraph(D->getGlobalsGraph(), GlobalECs, *TypeSS,
+  GlobalsGraph = DSGraph::create(D->getGlobalsGraph(), GlobalECs, *TypeSS,
                              copyGlobalAuxCalls? DSGraph::CloneAuxCallNodes
                              :DSGraph::DontCloneAuxCallNodes);
   if (useAuxCalls) GlobalsGraph->setUseAuxCalls();
@@ -1516,8 +1510,8 @@ void DataStructures::init(const DataLayout* T) {
   GraphSource = 0;
   Clone = false;
   TD = T;
-  TypeSS = new SuperSet<Type*>();
-  GlobalsGraph = new DSGraph(GlobalECs, *T, *TypeSS);
+  TypeSS = std::make_unique<SuperSet<Type*>>();
+  GlobalsGraph = DSGraph::create(GlobalECs, *T, *TypeSS);
 }
 
 // CBU has the correct call graph. All the passes that follow it 
@@ -1526,27 +1520,4 @@ void DataStructures::init(const DataLayout* T) {
 // EQBU and subsequent passes must call this.
 void DataStructures::restoreCorrectCallGraph(){
   callgraph = GraphSource->callgraph;
-}
-
-void DataStructures::releaseMemory() {
-  //
-  // If the DSGraphs were stolen by another pass, free nothing.
-  //
-  if (DSGraphsStolen) return;
-
-  std::set<DSGraph*> toDelete;
-  for (DSInfoTy::iterator I = DSInfo.begin(), E = DSInfo.end(); I != E; ++I) {
-    I->second->getReturnNodes().clear();
-    toDelete.insert(I->second);
-    I->second = 0;
-  }
-  for (DSGraph const* G : toDelete)
-    delete G; 
-
-  // Empty map so next time memory is released, data structures are not
-  // re-deleted.
-  DSInfo.clear();
-
-  delete GlobalsGraph;
-  GlobalsGraph = 0;
 }

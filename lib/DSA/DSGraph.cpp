@@ -10,9 +10,8 @@
 // This file implements the core data structure functionality.
 //
 //===----------------------------------------------------------------------===//
-#include <llvm/IR/InstrTypes.h>
+
 #define DEBUG_TYPE "dsgraph"
-#include "dsa/DSGraphTraits.h"
 #include "dsa/DataStructure.h"
 #include "dsa/DSGraph.h"
 #include "dsa/DSSupport.h"
@@ -26,17 +25,16 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/ADT/DepthFirstIterator.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SCCIterator.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/GlobalAlias.h"
+#include <llvm/IR/InstrTypes.h>
 
-#include <iostream>
 #include <algorithm>
+#include <memory>
+
 using namespace llvm;
 
 #define COLLAPSE_ARRAYS_AGGRESSIVELY 0
@@ -116,12 +114,10 @@ std::string DSGraph::getFunctionNames() const {
 }
 
 
-DSGraph::DSGraph(DSGraph* G, EquivalenceClasses<const GlobalValue*> &ECs,
-                 SuperSet<Type*>& tss,
-                 unsigned CloneFlags)
+DSGraph::DSGraph(std::shared_ptr<DSGraph> G, EquivalenceClasses<const GlobalValue*> &ECs,
+                 SuperSet<Type*>& tss)
   : GlobalsGraph(0), ScalarMap(ECs), TD(G->TD), TypeSS(tss) {
   UseAuxCalls = false;
-  cloneInto(G, CloneFlags);
 }
 
 DSGraph::~DSGraph() {
@@ -194,8 +190,8 @@ DSNode *DSGraph::addObjectToGraph(Value *Ptr, bool UseDeclaredType) {
 ///
 /// The CloneFlags member controls various aspects of the cloning process.
 ///
-void DSGraph::cloneInto( DSGraph* G, unsigned CloneFlags) {
-  assert(G != this && "Cannot clone graph into itself!");
+void DSGraph::cloneInto(std::shared_ptr<DSGraph> const& G, unsigned CloneFlags) {
+  assert(G != shared_from_this() && "Cannot clone graph into itself!");
 
   NodeMapTy OldNodeMap;
 
@@ -273,8 +269,8 @@ void DSGraph::cloneInto( DSGraph* G, unsigned CloneFlags) {
 /// this graph, then clearing the RHS graph.  Instead of performing this as
 /// two seperate operations, do it as a single, much faster, one.
 ///
-void DSGraph::spliceFrom(DSGraph* RHS) {
-  assert(this != RHS && "Splicing self");
+void DSGraph::spliceFrom(std::shared_ptr<DSGraph> const& RHS) {
+  assert(shared_from_this() != RHS && "Splicing self");
   // Change all of the nodes in RHS to think we are their parent.
   for (NodeListTy::iterator I = RHS->Nodes.begin(), E = RHS->Nodes.end();
        I != E; ++I)
@@ -420,115 +416,6 @@ OutOfLoop:
   SCCStack.pop_back();
   ThisNodeInfo.second = AnyDirectSuccessorsReachClonedNodes;
   return ThisNodeInfo;
-}
-
-/// mergeInCallFromOtherGraph - This graph merges in the minimal number of
-/// nodes from G2 into 'this' graph, merging the bindings specified by the
-/// call site (in this graph) with the bindings specified by the vector in G2.
-/// The two DSGraphs must be different.
-///
-void DSGraph::mergeInGraph(const DSCallSite &CS,
-                           std::vector<DSNodeHandle> &Args,
-                           const DSGraph &Graph, unsigned CloneFlags) {
-  assert((CloneFlags & DontCloneCallNodes) &&
-         "Doesn't support copying of call nodes!");
-
-  // If this is not a recursive call, clone the graph into this graph...
-  if (&Graph == this) {
-    // Merge the return value with the return value of the context.
-    Args[0].mergeWith(CS.getRetVal());
-
-    // Merge var-arg node
-    Args[1].mergeWith(CS.getVAVal());
-
-    // Resolve all of the function arguments.
-    for (unsigned i = 0, e = CS.getNumPtrArgs(); i != e; ++i) {
-      if (i == Args.size()-2)
-        break;
-
-      // Add the link from the argument scalar to the provided value.
-      Args[i+2].mergeWith(CS.getPtrArg(i));
-    }
-    return;
-  }
-
-  // Clone the callee's graph into the current graph, keeping track of where
-  // scalars in the old graph _used_ to point, and of the new nodes matching
-  // nodes of the old graph.
-  ReachabilityCloner RC(this, &Graph, CloneFlags);
-
-  // Map the return node pointer over.
-  if (!CS.getRetVal().isNull())
-    RC.merge(CS.getRetVal(), Args[0]);
-
-  // Map the variable arguments
-  if (!CS.getVAVal().isNull())
-    RC.merge(CS.getVAVal(), Args[1]);
-
-  // Map over all of the arguments.
-  for (unsigned i = 0, e = CS.getNumPtrArgs(); i != e; ++i) {
-    if (i == Args.size()-2)
-      break;
-
-    // Add the link from the argument scalar to the provided value.
-    RC.merge(CS.getPtrArg(i), Args[i+2]);
-  }
-
-  // We generally don't want to copy global nodes or aux calls from the callee
-  // graph to the caller graph.  However, we have to copy them if there is a
-  // path from the node to a node we have already copied which does not go
-  // through another global.  Compute the set of node that can reach globals and
-  // aux call nodes to copy over, then do it.
-  std::vector<const DSCallSite*> AuxCallToCopy;
-  std::vector<const GlobalValue*> GlobalsToCopy;
-
-  // NodesReachCopiedNodes - Memoize results for efficiency.  Contains a
-  // true/false value for every visited node that reaches a copied node without
-  // going through a global.
-  HackedGraphSCCFinder SCCFinder(RC);
-
-  if (!(CloneFlags & DontCloneAuxCallNodes))
-    for (afc_const_iterator I = Graph.afc_begin(), E = Graph.afc_end(); I!=E; ++I)
-      if (!I->isUnresolvable() && SCCFinder.PathExistsToClonedNode(*I))
-        AuxCallToCopy.push_back(&*I);
-
-  // Copy aux calls that are needed.
-  // Copy these before calculating the globals to be copied, as there might be
-  // globals that reach the nodes cloned due to aux calls.
-  for (unsigned i = 0, e = AuxCallToCopy.size(); i != e; ++i)
-    AuxFunctionCalls.push_back(DSCallSite(*AuxCallToCopy[i], RC));
-
-  const DSScalarMap &GSM = Graph.getScalarMap();
-  for (DSScalarMap::global_iterator GI = GSM.global_begin(),
-         E = GSM.global_end(); GI != E; ++GI) {
-    DSNode *GlobalNode = Graph.getNodeForValue(*GI).getNode();
-    for (DSNode::edge_iterator EI = GlobalNode->edge_begin(),
-           EE = GlobalNode->edge_end(); EI != EE; ++EI)
-      if (SCCFinder.PathExistsToClonedNode(EI->second.getNode())) {
-        GlobalsToCopy.push_back(*GI);
-        break;
-      }
-  }
-
-  // Copy globals that are needed.
-  for (unsigned i = 0, e = GlobalsToCopy.size(); i != e; ++i)
-    RC.getClonedNH(Graph.getNodeForValue(GlobalsToCopy[i]));
-}
-
-
-
-/// mergeInGraph - The method is used for merging graphs together.  If the
-/// argument graph is not *this, it makes a clone of the specified graph, then
-/// merges the nodes specified in the call site with the formal arguments in the
-/// graph.
-///
-void DSGraph::mergeInGraph(const DSCallSite &CS, const Function &F,
-                           const DSGraph &Graph, unsigned CloneFlags) {
-  // Set up argument bindings.
-  std::vector<DSNodeHandle> Args;
-  Graph.getFunctionArgumentsForCall(&F, Args);
-
-  mergeInGraph(CS, Args, Graph, CloneFlags);
 }
 
 /// getCallSiteForArguments - Get the arguments and return value bindings for
@@ -1096,7 +983,7 @@ void DSGraph::removeDeadNodes(unsigned Flags) {
   // This code merges information learned about the globals in 'this' graph
   // back into the globals graph, before it deletes any such global nodes, 
   // (with some new information possibly) from 'this' current function graph.
-  ReachabilityCloner GGCloner(getGlobalsGraph(), this, DSGraph::StripAllocaBit |
+  ReachabilityCloner GGCloner(getGlobalsGraph(), shared_from_this(), DSGraph::StripAllocaBit |
                               DSGraph::StripIncompleteBit);
 
   // Mark all nodes reachable by (non-global) scalar nodes as alive...
@@ -1475,7 +1362,7 @@ void DSGraph::computeCalleeCallerMapping(DSCallSite CS, const Function &Callee,
 /// nodes reachable from them from the globals graph into the current graph.
 ///
 void DSGraph::updateFromGlobalGraph() {
-  ReachabilityCloner RC(this, getGlobalsGraph(), 0);
+  ReachabilityCloner RC(shared_from_this(), getGlobalsGraph(), 0);
 
   // Clone the non-up-to-date global nodes into this graph.
   for (DSScalarMap::global_iterator I = getScalarMap().global_begin(),

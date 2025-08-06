@@ -45,6 +45,9 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/ValueSymbolTable.h"
+
+#include <memory>
+
 using namespace llvm;
 
 namespace {
@@ -108,12 +111,12 @@ class NodeValue {
     parseValue(M);
     assert(V && "Failed to parse value?");
     if (isa<GlobalValue>(V)) {
-      DSGraph *G = DS->getGlobalsGraph();
+      std::shared_ptr<DSGraph> G = DS->getGlobalsGraph();
       assert(G->hasNodeForValue(V) && "Node not in specified graph!");
       NH = G->getNodeForValue(V);
     } else {
       assert(F && "No function?");
-      DSGraph *G = DS->getDSGraph(*F);
+      std::shared_ptr<DSGraph> G = DS->getDSGraph(*F);
       assert(G->hasNodeForValue(V) && "Node not in specified graph!");
       NH = G->getNodeForValue(V);
     }

@@ -45,12 +45,12 @@ bool SteensgaardDataStructures::runOnModuleInternal (Module &M)
   assert(ResultGraph == 0 && "Result graph already allocated!");
 
   // Get a copy for the globals graph.
-  DSGraph * GG = DS->getGlobalsGraph();
-  GlobalsGraph = new DSGraph(GG, GG->getGlobalECs(), *TypeSS, 0);
+  std::shared_ptr<DSGraph> GG = DS->getGlobalsGraph();
+  setGlobalsGraph(DSGraph::create(GG, GG->getGlobalECs(), getTypeSS(), 0));
 
   // Create a new, empty, graph...
-  ResultGraph = std::make_shared<DSGraph>(GG->getGlobalECs(), getDataLayout(), 
-                            *TypeSS, getGlobalsGraph());
+  ResultGraph = DSGraph::create(GG->getGlobalECs(), getDataLayout(), 
+                            getTypeSS(), getGlobalsGraph());
 
   // Loop over the rest of the module, merging graphs for non-external functions
   // into this graph.
@@ -125,25 +125,23 @@ bool SteensgaardDataStructures::runOnModuleInternal (Module &M)
 
   ResultGraph->removeDeadNodes(DSGraph::KeepUnreachableGlobals);
 
-  GlobalsGraph->removeTriviallyDeadNodes();
-  GlobalsGraph->maskIncompleteMarkers();
+  getGlobalsGraph()->removeTriviallyDeadNodes();
+  getGlobalsGraph()->maskIncompleteMarkers();
 
   // Mark external globals incomplete.
-  GlobalsGraph->markIncompleteNodes(DSGraph::IgnoreGlobals);
+  getGlobalsGraph()->markIncompleteNodes(DSGraph::IgnoreGlobals);
 
   formGlobalECs();
 
   // Clone the global nodes into this graph.
-  ReachabilityCloner RC(ResultGraph.get(), getGlobalsGraph(),
+  ReachabilityCloner RC(ResultGraph, getGlobalsGraph(),
                         DSGraph::DontCloneCallNodes |
                         DSGraph::DontCloneAuxCallNodes);
-  for (DSScalarMap::global_iterator I = GlobalsGraph->getScalarMap().global_begin(),
-         E = GlobalsGraph->getScalarMap().global_end(); I != E; ++I)
+  for (DSScalarMap::global_iterator I = getGlobalsGraph()->getScalarMap().global_begin(),
+         E = getGlobalsGraph()->getScalarMap().global_end(); I != E; ++I)
     if (isa<GlobalVariable>(*I) || isa<Function> (*I))
-      RC.getClonedNH(GlobalsGraph->getNodeForValue(*I));
+      RC.getClonedNH(getGlobalsGraph()->getNodeForValue(*I));
    
-  //ResultGraph->writeGraphToFile (errs (), "Module.st");
-  
   return false;
 }
 

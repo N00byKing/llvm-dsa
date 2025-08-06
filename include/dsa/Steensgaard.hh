@@ -26,8 +26,8 @@ namespace llvm
   
     /// getDSGraph - Return the data structure graph for the specified function.
     ///
-    DSGraph* getOrCreateGraph(const Function *F) const {return ResultGraph.get();}
-    DSGraph *getDSGraph(const Function& F) const override
+    std::shared_ptr<DSGraph> getOrCreateGraph(const Function *F) const {return ResultGraph;}
+    std::shared_ptr<DSGraph> getDSGraph(const Function& F) const override
     {
       return F.isDeclaration () ? NULL : getOrCreateGraph(&F);
     }
@@ -36,8 +36,6 @@ namespace llvm
 
     void print(llvm::raw_ostream &O, const Module *M) const;
   };
-
-  extern char &SteensgaardDataStructuresID;  
 }
 
 

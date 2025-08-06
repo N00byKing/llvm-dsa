@@ -26,6 +26,8 @@
 #include "llvm/Support/Timer.h"
 #include "llvm/IR/Module.h"
 
+#include <memory>
+
 using namespace llvm;
 
 STATISTIC(NumNodesFoldedInStdLib,    "Number of nodes folded in std lib");
@@ -443,12 +445,12 @@ const struct {
 //
 void
 StdLibDataStructures::eraseCallsTo(Function* F) {
-  typedef std::pair<DSGraph*,Function*> RemovalPair;
-  DenseSet<RemovalPair> ToRemove;
+  typedef std::pair<std::shared_ptr<DSGraph>,Function*> RemovalPair;
+  std::set<RemovalPair> ToRemove;
   for (User const* U : F->users())
     if (CallBase const* CI = dyn_cast<CallBase>(U)){
       if (CI->getCalledOperand() == F) {
-        DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
+        std::shared_ptr<DSGraph> Graph = getDSGraph(*CI->getParent()->getParent());
         //delete the call
         LLVM_DEBUG(errs() << "Removing " << F->getName().str() << " from "
               << CI->getParent()->getParent()->getName().str() << "\n");
@@ -459,7 +461,7 @@ StdLibDataStructures::eraseCallsTo(Function* F) {
         for (User const* CU : CE->users()) {
           if (CallInst const* CI = dyn_cast<CallInst>(CU)){
             if(CI->getCalledOperand() == CE) {
-              DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
+              std::shared_ptr<DSGraph> Graph = getDSGraph(*CI->getParent()->getParent());
               //delete the call
               LLVM_DEBUG(errs() << "Removing " << F->getName().str() << " from "
                     << CI->getParent()->getParent()->getName().str() << "\n");
@@ -509,7 +511,7 @@ StdLibDataStructures::processRuntimeCheck (Module & M,
        ii != ee; ++ii) {
     if (CallInst* CI = dyn_cast<CallInst>(*ii)) {
       if (CI->getCalledOperand() == F) {
-        DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
+        std::shared_ptr<DSGraph> Graph = getDSGraph(*CI->getParent()->getParent());
         DSNodeHandle & RetNode = Graph->getNodeForValue(CI);
         DSNodeHandle & ArgNode = Graph->getNodeForValue(CI->getArgOperand(arg));
         RetNode.mergeWith(ArgNode);
@@ -630,7 +632,7 @@ StdLibDataStructures::Result StdLibDataStructures::run(Module &M, ModuleAnalysis
   GlobalsGraph->computeExternalFlags(DSGraph::ResetExternal);
   for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I)
     if (!I->isDeclaration()) {
-      DSGraph * G = getDSGraph(*I);
+      std::shared_ptr<DSGraph> G = getDSGraph(*I);
       unsigned EFlags = 0
         | DSGraph::ResetExternal
         | DSGraph::DontMarkFormalsExternal
@@ -647,7 +649,7 @@ StdLibDataStructures::Result StdLibDataStructures::run(Module &M, ModuleAnalysis
   LLVM_DEBUG(GlobalsGraph->AssertGraphOK());
   for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I)
     if (!I->isDeclaration()) {
-      DSGraph *Graph = getOrCreateGraph(&*I);
+      std::shared_ptr<DSGraph> Graph = getOrCreateGraph(&*I);
       Graph->maskIncompleteMarkers();
       cloneGlobalsInto(Graph, DSGraph::DontCloneCallNodes |
                        DSGraph::DontCloneAuxCallNodes);
@@ -664,7 +666,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
        ii != ee; ++ii)
     if (CallInst* CI = dyn_cast<CallInst>(*ii)){
       if (CI->getCalledOperand() == F) {
-        DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
+        std::shared_ptr<DSGraph> Graph = getDSGraph(*CI->getParent()->getParent());
 
         //
         // Set the read, write, and heap markers on the return value
@@ -736,7 +738,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
       }
     } else if (InvokeInst* CI = dyn_cast<InvokeInst>(*ii)){
       if (CI->getCalledOperand() == F) {
-        DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
+        std::shared_ptr<DSGraph> Graph = getDSGraph(*CI->getParent()->getParent());
 
         //
         // Set the read, write, and heap markers on the return value
@@ -813,7 +815,7 @@ void StdLibDataStructures::processFunction(int x, Function *F) {
 
           if (CallInst* CI = dyn_cast<CallInst>(*ci)){
             if (CI->getCalledOperand() == CE) {
-              DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
+              std::shared_ptr<DSGraph> Graph = getDSGraph(*CI->getParent()->getParent());
 
               //
               // Set the read, write, and heap markers on the return value

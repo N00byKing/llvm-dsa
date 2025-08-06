@@ -27,6 +27,7 @@
 #include <llvm/IR/Analysis.h>
 #include <llvm/IR/PassManager.h>
 #include <map>
+#include <memory>
 #include <set>
 
 namespace llvm {
@@ -41,13 +42,13 @@ class DSNodeHandle;
 
 class DataStructures {
 
-  typedef std::map<const Function*, DSGraph*> DSInfoTy;
+  typedef std::map<const Function*, std::shared_ptr<DSGraph>> DSInfoTy;
 
   /// DataLayout, comes in handy
-  const DataLayout* TD;
+  const DataLayout* TD = 0;
 
   /// Pass to get Graphs from
-  DataStructures* GraphSource;
+  DataStructures* GraphSource = 0;
 
   /// Do we clone Graphs or steal them?
   bool Clone;
@@ -56,7 +57,7 @@ class DataStructures {
   bool resetAuxCalls;
 
   /// Were are DSGraphs stolen by another pass?
-  bool DSGraphsStolen;
+  bool DSGraphsStolen = false;
 
   void buildGlobalECs(svset<const GlobalValue*>& ECGlobals);
 
@@ -71,34 +72,33 @@ class DataStructures {
 protected:
 
   /// The Globals Graph contains all information on the globals
-  DSGraph *GlobalsGraph;
+  std::shared_ptr<DSGraph> GlobalsGraph = 0;
 
   /// GlobalECs - The equivalence classes for each global value that is merged
   /// with other global values in the DSGraphs.
   EquivalenceClasses<const GlobalValue*> GlobalECs;
 
-  SuperSet<Type*>* TypeSS;
+  std::shared_ptr<SuperSet<Type*>> TypeSS;
 
   // Callgraph, as computed so far
   DSCallGraph callgraph;
   // List of all address taken functions.
   // This is used as target, of indirect calls for any indirect call site with  // incomplete callee node.
-  std::vector<const Function*> GlobalFunctionList; 
+  std::vector<const Function*> GlobalFunctionList;
 
   void init(DataStructures* D, bool clone, bool useAuxCalls, bool copyGlobalAuxCalls, bool resetAux);
   void init(const DataLayout* T);
 
   void formGlobalECs();
   
-  void cloneIntoGlobals(DSGraph* G, unsigned cloneFlags);
-  void cloneGlobalsInto(DSGraph* G, unsigned cloneFlags);
+  void cloneIntoGlobals(std::shared_ptr<DSGraph> const& G, unsigned cloneFlags);
+  void cloneGlobalsInto(std::shared_ptr<DSGraph> const& G, unsigned cloneFlags);
 
   void restoreCorrectCallGraph();
-  
+
   void formGlobalFunctionList();
 
-  DataStructures() : TD(0), GraphSource(0), DSGraphsStolen(false), GlobalsGraph(0) {}
-  virtual ~DataStructures() {}
+  virtual ~DataStructures() {};
 
 public:
   /// print - Print out the analysis results...
@@ -110,27 +110,26 @@ public:
   ///
   bool handleTest(llvm::raw_ostream &O, const Module *M) const;
 
-  virtual void releaseMemory();
-
   virtual bool hasDSGraph(const Function &F) const {
     return DSInfo.find(&F) != DSInfo.end();
   }
 
   /// getDSGraph - Return the data structure graph for the specified function.
   ///
-  virtual DSGraph *getDSGraph(const Function &F) const {
+  virtual std::shared_ptr<DSGraph> getDSGraph(const Function &F) const {
     DSInfoTy::const_iterator I = DSInfo.find(&F);
     assert(I != DSInfo.end() && "Function not in module!");
     return I->second;
   }
 
-  void setDSGraph(const Function& F, DSGraph* G) {
+  void setDSGraph(const Function& F, std::shared_ptr<DSGraph> G) {
     DSInfo[&F] = G;
   }
 
-  DSGraph* getOrCreateGraph(const Function* F);
+  std::shared_ptr<DSGraph> getOrCreateGraph(const Function* F);
 
-  DSGraph* getGlobalsGraph() const { return GlobalsGraph; }
+  std::shared_ptr<DSGraph> getGlobalsGraph() const { return GlobalsGraph; }
+  void setGlobalsGraph(std::shared_ptr<DSGraph> GG) { GlobalsGraph = GG; }
 
   EquivalenceClasses<const GlobalValue*> &getGlobalECs() { return GlobalECs; }
 
@@ -155,7 +154,6 @@ public:
 class LocalDataStructures : public DataStructures, public AnalysisInfoMixin<LocalDataStructures> {
   std::set<Function*> addrAnalysis;
 public:
-  ~LocalDataStructures() { releaseMemory(); }
   static inline AnalysisKey Key;
 
   struct Result { LocalDataStructures* res; };
@@ -171,7 +169,6 @@ class StdLibDataStructures : public DataStructures, public AnalysisInfoMixin<Std
   AllocIdentify::AllocIdentResult AllocWrappersAnalysis;
 public:
   static inline AnalysisKey Key;
-  ~StdLibDataStructures() { releaseMemory(); }
 
   struct Result { StdLibDataStructures* res; };
   Result run(Module &M, ModuleAnalysisManager& MAM);

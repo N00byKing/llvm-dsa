@@ -38,6 +38,7 @@
 #include "llvm/Support/Timer.h"
 
 #include <fstream>
+#include <memory>
 
 // FIXME: This should eventually be a FunctionPass that is automatically
 // aggregated into a Pass.
@@ -72,7 +73,7 @@ namespace {
   /// graph by performing a single pass over the function in question.
   ///
   class GraphBuilder : InstVisitor<GraphBuilder> {
-    DSGraph &G;
+    std::shared_ptr<DSGraph> G;
     Function* FB;
     LocalDataStructures* DS;
     const DataLayout& TD;
@@ -88,7 +89,7 @@ namespace {
     ///
     DSNode *createNode() 
     {   
-      DSNode* ret = new DSNode(&G);
+      DSNode* ret = new DSNode(G.get());
       assert(ret->getParentGraph() && "No parent?");
       return ret;
     }
@@ -144,8 +145,8 @@ namespace {
     void visitVAStartNode(DSNode* N);
 
   public:
-    GraphBuilder(Function &f, DSGraph &g, LocalDataStructures& DSi)
-      : G(g), FB(&f), DS(&DSi), TD(g.getDataLayout()), VAArray(0) {
+    GraphBuilder(Function &f, std::shared_ptr<DSGraph> g, LocalDataStructures& DSi)
+      : G(g), FB(&f), DS(&DSi), TD(g->getDataLayout()), VAArray(0) {
       // Create scalar nodes for all pointer arguments...
       for (Function::arg_iterator I = f.arg_begin(), E = f.arg_end();
            I != E; ++I) {
@@ -168,10 +169,10 @@ namespace {
 
       // Create an entry for the return, which tracks which functions are in
       // the graph
-      g.getOrCreateReturnNodeFor(f);
+      g->getOrCreateReturnNodeFor(f);
 
       // Create a node to handle information about variable arguments
-      g.getOrCreateVANodeFor(f);
+      g->getOrCreateVANodeFor(f);
 
       visit(f);  // Single pass over the function
 
@@ -181,33 +182,33 @@ namespace {
       // Only merge info for nodes that already exist in the local pass
       // otherwise leaf functions could contain less collapsing than the globals
       // graph
-      if (g.getScalarMap().global_begin() != g.getScalarMap().global_end()) {
-        ReachabilityCloner RC(&g, g.getGlobalsGraph(), 0);
-        for (DSScalarMap::global_iterator I = g.getScalarMap().global_begin(),
-             E = g.getScalarMap().global_end(); I != E; ++I) {
+      if (g->getScalarMap().global_begin() != g->getScalarMap().global_end()) {
+        ReachabilityCloner RC(g, g->getGlobalsGraph(), 0);
+        for (DSScalarMap::global_iterator I = g->getScalarMap().global_begin(),
+             E = g->getScalarMap().global_end(); I != E; ++I) {
           if (const GlobalVariable * GV = dyn_cast<GlobalVariable > (*I))
             if (GV->isConstant())
-              RC.merge(g.getNodeForValue(GV), g.getGlobalsGraph()->getNodeForValue(GV));
+              RC.merge(g->getNodeForValue(GV), g->getGlobalsGraph()->getNodeForValue(GV));
         }
       }
 
-      g.markIncompleteNodes(DSGraph::MarkFormalArgs);
+      g->markIncompleteNodes(DSGraph::MarkFormalArgs);
 
       // Compute sources of external
       unsigned EFlags = 0
         | DSGraph::DontMarkFormalsExternal
         | DSGraph::ProcessCallSites;
 
-      g.computeExternalFlags(EFlags);
-      g.computeIntPtrFlags();
+      g->computeExternalFlags(EFlags);
+      g->computeIntPtrFlags();
 
       // Remove any nodes made dead due to merging...
-      g.removeDeadNodes(DSGraph::KeepUnreachableGlobals);
+      g->removeDeadNodes(DSGraph::KeepUnreachableGlobals);
     }
 
     // GraphBuilder ctor for working on the globals graph
-    explicit GraphBuilder(DSGraph& g)
-      :G(g), FB(0), TD(g.getDataLayout()), VAArray(0)
+    explicit GraphBuilder(std::shared_ptr<DSGraph> g)
+      :G(g), FB(0), TD(g->getDataLayout()), VAArray(0)
     {}
 
     void mergeInGlobalInitializer(GlobalVariable *GV);
@@ -217,10 +218,10 @@ namespace {
 
   /// Traverse the whole DSGraph, and propagate the unknown flags through all 
   /// out edges.
-  static void propagateUnknownFlag(DSGraph * G) {
+  static void propagateUnknownFlag(std::shared_ptr<DSGraph> const& G) {
     std::vector<DSNode *> workList;
     DenseSet<DSNode *> visited;
-    for (DSGraph::node_iterator I = G->node_begin(), E = G->node_end(); I != E; ++I)
+    for (auto I = G->node_begin(), E = G->node_end(); I != E; ++I)
       if (I->isUnknownNode()) 
         workList.push_back(&*I);
   
@@ -249,7 +250,7 @@ DSNodeHandle GraphBuilder::getValueDest(Value* V) {
   if (isa<Constant>(V) && cast<Constant>(V)->isNullValue()) 
     return 0;  // Null doesn't point to anything, don't add to ScalarMap!
 
-  DSNodeHandle &NH = G.getNodeForValue(V);
+  DSNodeHandle &NH = G->getNodeForValue(V);
   if (!NH.isNull())
     return NH;     // Already have a node?  Just return it...
 
@@ -278,19 +279,19 @@ DSNodeHandle GraphBuilder::getValueDest(Value* V) {
           NH = createNode()->setUnknownMarker();
       } else if (CE->getOpcode() == Instruction::GetElementPtr) {
         visitGetElementPtrInst(*CE);
-        assert(G.hasNodeForValue(CE) && "GEP didn't get processed right?");
-        NH = G.getNodeForValue(CE);
+        assert(G->hasNodeForValue(CE) && "GEP didn't get processed right?");
+        NH = G->getNodeForValue(CE);
       } else {
         // This returns a conservative unknown node for any unhandled ConstExpr
         NH = createNode()->setUnknownMarker();
       }
       if (NH.isNull()) {  // (getelementptr null, X) returns null
-        G.eraseNodeForValue(V);
+        G->eraseNodeForValue(V);
         return 0;
       }
       return NH;
     } else if (isa<UndefValue>(C)) {
-      G.eraseNodeForValue(V);
+      G->eraseNodeForValue(V);
       return 0;
     } else if (isa<GlobalAlias>(C)) {
       // XXX: Need more investigation
@@ -350,7 +351,7 @@ DSNodeHandle &GraphBuilder::getLink(const DSNodeHandle &node, unsigned LinkNo) {
 /// merge the two destinations together.
 ///
 void GraphBuilder::setDestTo(Value &V, const DSNodeHandle &NH) {
-  G.getNodeForValue(&V).mergeWith(NH);
+  G->getNodeForValue(&V).mergeWith(NH);
 }
 
 
@@ -364,7 +365,7 @@ void GraphBuilder::setDestTo(Value &V, const DSNodeHandle &NH) {
 void GraphBuilder::visitPHINode(PHINode &PN) {
   if (!isa<PointerType>(PN.getType())) return; // Only pointer PHIs
 
-  DSNodeHandle &PNDest = G.getNodeForValue(&PN);
+  DSNodeHandle &PNDest = G->getNodeForValue(&PN);
   for (unsigned i = 0, e = PN.getNumIncomingValues(); i != e; ++i)
     PNDest.mergeWith(getValueDest(PN.getIncomingValue(i)));
 }
@@ -373,7 +374,7 @@ void GraphBuilder::visitSelectInst(SelectInst &SI) {
   if (!isa<PointerType>(SI.getType()))
     return; // Only pointer Selects
 
-  DSNodeHandle &Dest = G.getNodeForValue(&SI);
+  DSNodeHandle &Dest = G->getNodeForValue(&SI);
   DSNodeHandle S1 = getValueDest(SI.getOperand(1));
   DSNodeHandle S2 = getValueDest(SI.getOperand(2));
   Dest.mergeWith(S1);
@@ -510,7 +511,7 @@ void GraphBuilder::visitAtomicRMWInst(AtomicRMWInst &I) {
 
 void GraphBuilder::visitReturnInst(ReturnInst &RI) {
   if (RI.getNumOperands() && isa<PointerType>(RI.getOperand(0)->getType()))
-    G.getOrCreateReturnNodeFor(*FB).mergeWith(getValueDest(RI.getOperand(0)));
+    G->getOrCreateReturnNodeFor(*FB).mergeWith(getValueDest(RI.getOperand(0)));
 }
 
 void GraphBuilder::visitVAArgInst(VAArgInst &I) {
@@ -519,7 +520,7 @@ void GraphBuilder::visitVAArgInst(VAArgInst &I) {
     // be used also to pass arguments by register.
     // We model this by having both the i8*'s point to an array of pointers
     // to the arguments.
-    DSNodeHandle Ptr = G.getVANodeFor(*FB);
+    DSNodeHandle Ptr = G->getVANodeFor(*FB);
     DSNodeHandle Dest = getValueDest(&I);
     if (Ptr.isNull()) return;
 
@@ -822,7 +823,7 @@ void GraphBuilder::visitVAStartNode(DSNode* N) {
   assert(M && "No module for function");
 
   // Fetch the VANode associated with the func containing the call to va_start
-  DSNodeHandle & VANH = G.getVANodeFor(*FB);
+  DSNodeHandle & VANH = G->getVANodeFor(*FB);
   // Make sure this NodeHandle has a node to go with it
   if (VANH.isNull()) VANH.mergeWith(createNode());
 
@@ -1083,11 +1084,11 @@ void GraphBuilder::visitCallSite(CallBase* CS) {
   // Add a new function call entry...
   if (CalleeNode) {
     ++NumIndirectCall;
-    G.getFunctionCalls().push_back(DSCallSite(CS, RetVal, VarArgNH, CalleeNode,
+    G->getFunctionCalls().push_back(DSCallSite(CS, RetVal, VarArgNH, CalleeNode,
                                               Args));
   } else {
     ++NumDirectCall;
-    G.getFunctionCalls().push_back(DSCallSite(CS, RetVal, VarArgNH,
+    G->getFunctionCalls().push_back(DSCallSite(CS, RetVal, VarArgNH,
                                               cast<Function>(Callee),
                                               Args));
   }
@@ -1253,7 +1254,7 @@ void GraphBuilder::mergeExternalGlobal(GlobalVariable *GV) {
 // read a description of this behavior in and apply it
 // format: numglobals section globals...
 // terminates when numglobals == 0
-void handleMagicSections(DSGraph* GlobalsGraph, Module& M) {
+void handleMagicSections(std::shared_ptr<DSGraph> const& GlobalsGraph, Module& M) {
   std::ifstream msf(hasMagicSections.c_str(), std::ifstream::in);
   if (msf.good()) {
     //no checking happens here
@@ -1301,7 +1302,7 @@ LocalDataStructures::Result LocalDataStructures::run(Module &M, ModuleAnalysisMa
 
   // First step, build the globals graph.
   {
-    GraphBuilder GGB(*GlobalsGraph);
+    GraphBuilder GGB(GlobalsGraph);
 
     // Add initializers for all of the globals to the globals graph.
     for (GlobalVariable& GV : M.globals())
@@ -1335,8 +1336,8 @@ LocalDataStructures::Result LocalDataStructures::run(Module &M, ModuleAnalysisMa
   // Calculate all of the graphs...
   for (Function& F : M)
     if (!F.isDeclaration()) {
-      DSGraph* G = new DSGraph(GlobalECs, getDataLayout(), *TypeSS, getGlobalsGraph());
-      GraphBuilder GGB(F, *G, *this);
+      std::shared_ptr<DSGraph> G = DSGraph::create(GlobalECs, getDataLayout(), *TypeSS, getGlobalsGraph());
+      GraphBuilder GGB(F, G, *this);
       G->getAuxFunctionCalls() = G->getFunctionCalls();
       setDSGraph(F, G);
       propagateUnknownFlag(G);
@@ -1366,7 +1367,7 @@ LocalDataStructures::Result LocalDataStructures::run(Module &M, ModuleAnalysisMa
   propagateUnknownFlag(getGlobalsGraph());
   for (Function const& F : M)
     if (!F.isDeclaration()) {
-      DSGraph *Graph = getOrCreateGraph(&F);
+      std::shared_ptr<DSGraph> Graph = getOrCreateGraph(&F);
       Graph->maskIncompleteMarkers();
       cloneGlobalsInto(Graph, DSGraph::DontCloneCallNodes |
                        DSGraph::DontCloneAuxCallNodes);
