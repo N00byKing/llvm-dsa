@@ -1312,7 +1312,7 @@ LocalDataStructures::Result LocalDataStructures::run(Module &M, ModuleAnalysisMa
           GGB.mergeInGlobalInitializer(&GV);
       }
     // Add Functions to the globals graph.
-    for (Function& F : M){
+    for (Function& F : M) {
       if(addrAnalysis.count(&F)) {
         GGB.mergeFunction(&F);
       }
@@ -1364,7 +1364,7 @@ LocalDataStructures::Result LocalDataStructures::run(Module &M, ModuleAnalysisMa
   formGlobalECs();
 
   propagateUnknownFlag(getGlobalsGraph());
-  for (Function& F : M)
+  for (Function const& F : M)
     if (!F.isDeclaration()) {
       DSGraph *Graph = getOrCreateGraph(&F);
       Graph->maskIncompleteMarkers();

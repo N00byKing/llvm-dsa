@@ -55,7 +55,7 @@ bool SteensgaardDataStructures::runOnModuleInternal (Module &M)
   // Loop over the rest of the module, merging graphs for non-external functions
   // into this graph.
   //
-  for (const Function &F : M)
+  for (Function const& F : M)
     if (!F.isDeclaration()) 
       ResultGraph->spliceFrom(DS->getDSGraph(F));
 

@@ -445,9 +445,8 @@ void
 StdLibDataStructures::eraseCallsTo(Function* F) {
   typedef std::pair<DSGraph*,Function*> RemovalPair;
   DenseSet<RemovalPair> ToRemove;
-  for (Value::user_iterator ii = F->user_begin(), ee = F->user_end();
-       ii != ee; ++ii)
-    if (CallBase* CI = dyn_cast<CallBase>(*ii)){
+  for (User const* U : F->users())
+    if (CallBase const* CI = dyn_cast<CallBase>(U)){
       if (CI->getCalledOperand() == F) {
         DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
         //delete the call
@@ -455,11 +454,10 @@ StdLibDataStructures::eraseCallsTo(Function* F) {
               << CI->getParent()->getParent()->getName().str() << "\n");
         ToRemove.insert(std::make_pair(Graph, F));
       }
-    } else if(ConstantExpr *CE = dyn_cast<ConstantExpr>(*ii)) {
+    } else if(ConstantExpr const* CE = dyn_cast<ConstantExpr>(U)) {
       if(CE->isCast()) {
-        for (Value::user_iterator ci = CE->user_begin(), ce = CE->user_end();
-             ci != ce; ++ci) {
-          if (CallInst* CI = dyn_cast<CallInst>(*ci)){
+        for (User const* CU : CE->users()) {
+          if (CallInst const* CI = dyn_cast<CallInst>(CU)){
             if(CI->getCalledOperand() == CE) {
               DSGraph* Graph = getDSGraph(*CI->getParent()->getParent());
               //delete the call
@@ -472,9 +470,8 @@ StdLibDataStructures::eraseCallsTo(Function* F) {
       }
     }
 
-  for(DenseSet<RemovalPair>::iterator I = ToRemove.begin(), E = ToRemove.end();
-      I != E; ++I)
-    I->first->removeFunctionCalls(*I->second);
+  for(RemovalPair const& RP : ToRemove)
+    RP.first->removeFunctionCalls(*RP.second);
 }
 
 //
@@ -540,7 +537,7 @@ StdLibDataStructures::Result StdLibDataStructures::run(Module &M, ModuleAnalysis
   //
   // Fetch the DSGraphs for all defined functions within the module.
   //
-  for (Function& F : M)
+  for (Function const& F : M)
     if (!F.isDeclaration())
       getOrCreateGraph(&F);
 

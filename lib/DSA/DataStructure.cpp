@@ -1540,7 +1540,7 @@ void DataStructures::releaseMemory() {
     toDelete.insert(I->second);
     I->second = 0;
   }
-  for (DSGraph* G : toDelete)
+  for (DSGraph const* G : toDelete)
     delete G; 
 
   // Empty map so next time memory is released, data structures are not
