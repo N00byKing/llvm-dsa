@@ -60,21 +60,20 @@ bool AllocIdentify::flowsFrom(Value *Dest,Value *Src) {
 
 bool isNotStored(Value *V) {
   // check that V is not stored to a location that is accessible outside this fn
-  for(Value::user_iterator ui = V->user_begin(), ue = V->user_end();
-      ui != ue; ++ui) {
-    if(isa<StoreInst>(*ui))
+  for(User* U : V->users()) {
+    if(isa<StoreInst>(U))
       return false;
-    if(isa<ICmpInst>(*ui))
+    if(isa<ICmpInst>(U))
       continue;
-    if(isa<ReturnInst>(*ui))
+    if(isa<ReturnInst>(U))
       continue;
-    if(BitCastInst *BI = dyn_cast<BitCastInst>(*ui)) {
+    if(BitCastInst *BI = dyn_cast<BitCastInst>(U)) {
       if(isNotStored(BI))
         continue;
       else
         return false;
     }
-    if(PHINode *PN = dyn_cast<PHINode>(*ui)) {
+    if(PHINode *PN = dyn_cast<PHINode>(U)) {
       if(isNotStored(PN))
         continue;
       else
@@ -121,15 +120,13 @@ AllocIdentify::Result AllocIdentify::run(Module& M, ModuleAnalysisManager& _MAM)
     changed = false;
     std::set<std::string> TempAllocators;
     TempAllocators.insert( allocators.begin(), allocators.end());
-    std::set<std::string>::iterator it;
-    for(it = TempAllocators.begin(); it != TempAllocators.end(); ++it) {
-      Function* F = M.getFunction(*it);
+    for(std::string funcName : TempAllocators) {
+      Function* F = M.getFunction(funcName);
       if(!F)
         continue;
-      for(Value::user_iterator ui = F->user_begin(), ue = F->user_end();
-          ui != ue; ++ui) {
+      for(User* U : F->users()) {
         // iterate though all calls to malloc
-        if (CallInst* CI = dyn_cast<CallInst>(*ui)) {
+        if (CallInst* CI = dyn_cast<CallInst>(U)) {
           // The function that calls malloc could be a potential allocator
           Function *WrapperF = CI->getParent()->getParent();
           if(WrapperF->doesNotReturn())
@@ -172,16 +169,13 @@ AllocIdentify::Result AllocIdentify::run(Module& M, ModuleAnalysisManager& _MAM)
     changed = false;
     std::set<std::string> TempDeallocators;
     TempDeallocators.insert( deallocators.begin(), deallocators.end());
-    std::set<std::string>::iterator it;
-    for(it = TempDeallocators.begin(); it != TempDeallocators.end(); ++it) {
-      Function* F = M.getFunction(*it);
+    for(std::string funcName : TempDeallocators) {
+      Function* F = M.getFunction(funcName);
+      if(!F) continue;
 
-      if(!F)
-        continue;
-      for(Value::user_iterator ui = F->user_begin(), ue = F->user_end();
-          ui != ue; ++ui) {
+      for (User* U :F->users()) {
         // iterate though all calls to malloc
-        if (CallInst* CI = dyn_cast<CallInst>(*ui)) {
+        if (CallInst* CI = dyn_cast<CallInst>(U)) {
           // The function that calls malloc could be a potential allocator
           Function *WrapperF = CI->getParent()->getParent();
 
