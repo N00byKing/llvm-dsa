@@ -20,4 +20,4 @@ install(DIRECTORY include/
   PATTERN "CMakeFiles" EXCLUDE  
   PATTERN ".svn" EXCLUDE)
 
-add_subdirectory (lib/DSA)
+add_subdirectory (lib/)
