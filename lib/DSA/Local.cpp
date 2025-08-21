@@ -306,7 +306,7 @@ DSNodeHandle GraphBuilder::getValueDest(Value* V) {
       //
       N = createNode();
       N->setUnknownMarker();
-    } else if (isa<ConstantStruct>(C) || isa<ConstantArray>(C) ||
+    } else if (isa<ConstantStruct>(C) || isa<ConstantArray>(C) || isa<ConstantInt>(C) ||
                isa<ConstantDataSequential>(C) || isa<ConstantDataArray>(C) ||
                isa<ConstantDataVector>(C)) {
       // Treat these the same way we treat global initializers
